@@ -16,11 +16,9 @@ QubicLink establishes a secure **"2-Factor Handshake"** between a Web2 Identity 
 2.  **The Bridge:** EasyConnect listens for this specific signal on the Qubic Network.
 3.  **The Judge:** A Make.com scenario verifies the on-chain signal, links the identity, and automates community alerts.
 
-![Architecture Diagram]([PASTE A LINK TO YOUR MAKE.COM SCENARIO A SCREENSHOT HERE])
-*(Scenario A: The Clerk - Issues challenges via Discord)*
+<img width="1584" height="684" alt="image" src="https://github.com/user-attachments/assets/24c7011e-f18d-4b83-b7d9-5c3510d3a43f" />
 
-![Architecture Diagram]([PASTE A LINK TO YOUR MAKE.COM SCENARIO B SCREENSHOT HERE])
-*(Scenario B: The Judge - Verifies on-chain signals from EasyConnect)*
+<img width="914" height="295" alt="image" src="https://github.com/user-attachments/assets/ebebbcc7-b7dd-4de8-8151-616f4d91492d" />
 
 
 ### ⚠️ Hackathon Note

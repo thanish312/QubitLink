@@ -22,6 +22,10 @@ QubicLink establishes a secure **"2-Factor Handshake"** between a Web2 Identity 
 ![Architecture Diagram]([PASTE A LINK TO YOUR MAKE.COM SCENARIO B SCREENSHOT HERE])
 *(Scenario B: The Judge - Verifies on-chain signals from EasyConnect)*
 
+
+### ⚠️ Hackathon Note
+Due to age restrictions preventing Mainnet KYC and the lack of an active EasyConnect Testnet, all on-chain events in our demo are simulated. The Logic Engine, Database, and Discord Integrations are **fully functional** and production-ready.
+
 ---
 
 ### 🛠️ How to Use This Proof of Concept
@@ -37,10 +41,11 @@ This project is built with No-Code tools, but the logic can be tested and verifi
     ```
     !link YOUR_QUBIC_WALLET_ADDRESS
     ```
-*   Our bot, "The Clerk," will reply with a unique **Signal Code** (e.g., 30,482) that you must use to prove ownership.
+*   Our bot, "The Clerk," will reply with a unique **Signal Code** (e.g., 30,482) that you must use to prove ownership(keep in mind that this is checked every 15 minutes and may take some time but once recieved a dm will pop up stating the request has been recieved along with the Signal Code).
 
 #### Step 3: Simulate the On-Chain Event
 *   Open the `simulator.html` file provided in this repository.
+*   In the dropdown select Verification Transaction Alert.
 *   **Enter the following:**
     *   `sourceId`: The wallet address you used in the `!link` command.
     *   `numberOfShares`: The **Signal Code** the bot gave you.
@@ -61,5 +66,4 @@ This project is built with No-Code tools, but the logic can be tested and verifi
 
 ---
 
-### ⚠️ Hackathon Note
-Due to age restrictions preventing Mainnet KYC and the lack of an active EasyConnect Testnet, all on-chain events in our demo are simulated. The Logic Engine, Database, and Discord Integrations are **fully functional** and production-ready.
+

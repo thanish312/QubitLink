@@ -4,10 +4,13 @@
 
 QubicLink is the first **No-Code Identity Bridge** for the Qubic ecosystem. It solves the "Identity Gap" between anonymous Qubic wallets and social communities like Discord, enabling projects to authenticate their users, gamify holding behaviors, and automate loyalty rewards without writing a single line of C++ code.
 
-Quick tutorial video:https://www.loom.com/share/dcc8eb1d42c14db0802b9fc8ea114708
+Quick tutorial video:
+https://github.com/user-attachments/assets/70ace3c3-5769-4cf6-93c9-d26d2cec0689
+
 ---
 
 ### 💡 The Problem
+
 In the Qubic ecosystem, community management operates in the dark. A project founder sees a wallet with 1M tokens on-chain but has no way to identify that person in their Discord server. This prevents automated airdrops, VIP role assignments, and real-time community gamification.
 
 ### 🚀 The Solution

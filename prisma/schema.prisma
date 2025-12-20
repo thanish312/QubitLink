@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// The Human (Discord Account)
+model User {
+  discordId     String   @id @unique
+  createdAt     DateTime @default(now())
+  
+  // A user can own multiple wallets
+  wallets       Wallet[]
+}
+
+// The Asset (Qubic Wallet)
+model Wallet {
+  address       String   @id @unique // A wallet can only belong to ONE user (Security)
+  isVerified    Boolean  @default(false)
+  verifiedAt    DateTime?
+  
+  // Link back to the human
+  userId        String
+  user          User     @relation(fields: [userId], references: [discordId])
+}
+
+// Temporary Handshakes
+model Challenge {
+  id            Int      @id @default(autoincrement())
+  discordId     String
+  walletAddress String
+  signalCode    Int
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+}

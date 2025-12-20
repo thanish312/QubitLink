@@ -29,8 +29,10 @@ It closes the *identity gap* between anonymous Qubic wallets and social platform
 ## 📺 Demo Video
 
 **Winning prototype walkthrough:**
+<div>
+  <img src="https://github.com/user-attachments/assets/72375c96-eb3e-4e4e-9cf2-5b0b94390d68" />
+</div>
 
-https://github.com/user-attachments/assets/72375c96-eb3e-4e4e-9cf2-5b0b94390d68
 
 ---
 
@@ -70,7 +72,7 @@ QubicLink securely binds a **Web2 identity (Discord)** to a **Web3 asset (Qubic 
    Verifies wallet ↔ request pairing and triggers Discord automation
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/24c7011e-f18d-4b83-b7d9-5c3510d3a43f" alt="QubicLink V1 Architecture Diagram" width="900" />
+  <img src="https://github.com/user-attachments/assets/24c7011e-f18d-4b83-b7d9-5c3510d3a43f" alt="QubicLink V1 Architecture Diagram" />
 </div>
 
 ---

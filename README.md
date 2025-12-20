@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/user-attachments/assets/5629a3ab-4b3d-433d-a6c0-88773d8bde1c" alt="QubicLink Logo" width="140" />
+<img src="https://github.com/user-attachments/assets/5629a3ab-4b3d-433d-a6c0-88773d8bde1c" alt="QubicLink Logo" />
 
 <h1>QubicLink V1</h1>
 

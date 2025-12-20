@@ -29,9 +29,10 @@ It closes the *identity gap* between anonymous Qubic wallets and social platform
 ## 📺 Demo Video
 
 **Winning prototype walkthrough:**
-<div>
-  <img src="https://github.com/user-attachments/assets/72375c96-eb3e-4e4e-9cf2-5b0b94390d68" />
-</div>
+
+
+
+https://github.com/user-attachments/assets/72375c96-eb3e-4e4e-9cf2-5b0b94390d68
 
 
 ---

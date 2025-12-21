@@ -205,7 +205,6 @@ PORT               # Set to 3000
 
 ```bash
 npm install
-npm install express
 npx prisma generate
 npx prisma db push
 ```

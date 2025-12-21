@@ -4,7 +4,7 @@
 
 It enables secure wallet ownership verification, multi-wallet portfolio aggregation, and automated role assignment — without requiring users to sign transactions or interact with smart contracts.
 
-QubicLink is designed for real community workflows, not demos.
+QubicLink is designed for real community workflows and long-running Discord servers.
 
 ---
 

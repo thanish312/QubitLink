@@ -1,5 +1,5 @@
 /**
- * QubicLink V2 - GOLD MASTER PRODUCTION BUILD
+ * QubicLink V2 
  * 
  * FAILURE PROTECTIONS:
  * 1. Anti-Crash: All Discord interactions wrapped in try/catch.
@@ -75,6 +75,17 @@ async function removeRoleSafe(member, roleId, roleName) {
 
 // 4. Sleep (Rate Limiter)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Safe defer helper to avoid "Interaction has already been acknowledged" errors
+async function safeDeferReply(interaction) {
+    if (!interaction || interaction.deferred || interaction.replied) return;
+    try {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch (err) {
+        if (err && err.code === 40060) return; // already acknowledged
+        console.error('DeferReply Error:', err);
+    }
+}
 
 // ==========================================
 // 1. CRON JOB (THE SELF-HEALING SYSTEM)
@@ -250,7 +261,7 @@ client.on(Events.InteractionCreate, async interaction => {
     // --- COMMAND: /PORTFOLIO ---
     if (interaction.commandName === 'portfolio') {
         try {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await safeDeferReply(interaction);
             const wallets = await prisma.wallet.findMany({ where: { userId: interaction.user.id } });
 
             if (wallets.length === 0) return interaction.editReply('You have no linked wallets. Use `/link`.');
@@ -274,7 +285,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.commandName === 'link') {
         try {
             // SAFETY NET START
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await safeDeferReply(interaction);
 
             const walletInput = interaction.options.getString('wallet').trim().toUpperCase();
             const discordId = interaction.user.id;

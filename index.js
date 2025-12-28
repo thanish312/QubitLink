@@ -1,5 +1,5 @@
 /**
- * QubicLink V2 
+ * QubicLink V2 - FORT KNOX PRODUCTION BUILD
  * 
  * FAILURE PROTECTIONS:
  * 1. Anti-Crash: All Discord interactions wrapped in try/catch.
@@ -7,6 +7,11 @@
  * 3. Type Safety: BigInt for all balances.
  * 4. Hierarchy Safety: Checks permissions before adding roles.
  * 5. Rate Limiting: Sleep functions to prevent API bans.
+ * 
+ * SECURITY UPGRADES:
+ * 1. Layer 1: Strict Zod schema validation on all incoming webhooks.
+ * 2. Layer 2: Semantic on-chain validation via Qubic RPC.
+ * 3. Layer 3: Replay attack protection by logging processed txIds.
  */
 
 require('dotenv').config();
@@ -14,6 +19,7 @@ const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, Me
 const { PrismaClient } = require('@prisma/client');
 const express = require('express');
 const cron = require('node-cron');
+const { z } = require('zod'); // NEW: Schema validation library
 
 // --- SETUP ---
 const prisma = new PrismaClient();
@@ -31,6 +37,20 @@ const ROLES = {
     WHALE: process.env.WHALE_ROLE_ID
 };
 const WHALE_THRESHOLD = 1000000000n; // 1 Billion Qubic (BigInt)
+
+// --- LAYER 1: ZOD SCHEMA DEFINITION ---
+// This schema defines the exact structure of a valid EasyConnect payload.
+const easyConnectSchema = z.object({
+    ProcedureTypeName: z.literal("AddToBidOrder"),
+    ProcedureTypeValue: z.literal(6),
+    RawTransaction: z.object({
+        transaction: z.object({
+            sourceId: z.string().regex(/^[A-Z2-7]{52}$/), // Qubic address format
+            amount: z.string().regex(/^\d+$/), // String of digits
+            txId: z.string().length(60)
+        })
+    })
+}).strict(); // .strict() rejects any payload with extra, unexpected fields.
 
 // --- HELPER FUNCTIONS ---
 
@@ -84,6 +104,36 @@ async function safeDeferReply(interaction) {
     } catch (err) {
         if (err && err.code === 40060) return; // already acknowledged
         console.error('DeferReply Error:', err);
+    }
+}
+
+// --- LAYER 2: ON-CHAIN VERIFICATION HELPER ---
+async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
+    try {
+        console.log(`[L2] Verifying txId ${txId.substring(0,8)}... on-chain...`);
+        const response = await fetch(`https://rpc.qubic.org/v1/transactions/${txId}`);
+        if (!response.ok) {
+            console.warn(`[L2] ⚠️ RPC lookup failed for txId ${txId}.`);
+            return false;
+        }
+        const onChainTx = await response.json();
+
+        // Compare webhook data with live on-chain data
+        const isSourceValid = onChainTx.sourceId === expectedSource;
+        const isAmountValid = onChainTx.amount === expectedAmount; // Amounts are strings
+
+        if (!isSourceValid || !isAmountValid) {
+            console.warn(`[L2] ⚠️ Semantic Mismatch for ${txId}!`);
+            console.warn(`     -> Expected: ${expectedSource} | ${expectedAmount}`);
+            console.warn(`     -> On-Chain: ${onChainTx.sourceId} | ${onChainTx.amount}`);
+            return false;
+        }
+
+        console.log(`[L2] ✅ On-chain data matches.`);
+        return true;
+    } catch (error) {
+        console.error('[L2] Critical RPC Error:', error);
+        return false;
     }
 }
 
@@ -148,17 +198,39 @@ cron.schedule('*/30 * * * *', async () => {
 // ==========================================
 app.post('/webhook/qubic', async (req, res) => {
     try {
-        const payload = req.body;
-        // Strict Filter: Only accept Bids
-        if (payload.ProcedureTypeName !== 'AddToBidOrder') return res.status(200).send('Ignored');
+        // --- 🛡️ LAYER 1: STRICT PAYLOAD SCHEMA VALIDATION ---
+        const validationResult = easyConnectSchema.safeParse(req.body);
+        if (!validationResult.success) {
+            console.warn(`[L1] ⚠️ Invalid Schema Received. Rejecting.`);
+            console.warn(validationResult.error.issues);
+            return res.status(400).send('Invalid payload schema');
+        }
+        const payload = validationResult.data;
+        const tx = payload.RawTransaction.transaction;
 
-        const tx = payload.RawTransaction?.transaction;
-        if (!tx || !tx.sourceId || !tx.amount) {
-            console.error('❌ Invalid JSON Payload from Webhook');
-            return res.status(400).send('Invalid JSON');
+        // --- 🛡️ LAYER 3: REPLAY ATTACK PROTECTION ---
+        try {
+            await prisma.processedTransaction.create({
+                data: { txId: tx.txId }
+            });
+            console.log(`[L3] ✅ New txId ${tx.txId.substring(0,8)}... logged.`);
+        } catch (error) {
+            if (error.code === 'P2002') { // P2002 = Unique constraint violation
+                console.warn(`[L3] ⚠️ REPLAY ATTACK DETECTED! txId ${tx.txId} already processed.`);
+                return res.status(200).send('Already processed'); // Return 200 so EasyConnect doesn't retry
+            }
+            throw error; // Rethrow other DB errors
         }
 
-        const walletAddress = tx.sourceId.toUpperCase();
+        // --- 🛡️ LAYER 2: SEMANTIC (ON-CHAIN) VALIDATION ---
+        const isOnChainValid = await verifyTransactionOnChain(tx.txId, tx.sourceId, tx.amount);
+        if (!isOnChainValid) {
+            return res.status(400).send('On-chain validation failed');
+        }
+
+        // --- ✅ ALL SECURITY CHECKS PASSED ---
+        // Now we can trust the data and run the business logic.
+        const walletAddress = tx.sourceId;
         const bidAmount = parseInt(tx.amount, 10);
 
         console.log(`🔎 Incoming Bid: ${walletAddress.substring(0,6)}... | Amount: ${bidAmount}`);

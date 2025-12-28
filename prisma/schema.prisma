@@ -36,3 +36,9 @@ model Challenge {
   expiresAt     DateTime
   createdAt     DateTime @default(now())
 }
+
+
+model ProcessedTransaction {
+  txId      String   @id @unique // The Qubic Transaction ID
+  createdAt DateTime @default(now())
+}

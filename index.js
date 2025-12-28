@@ -12,7 +12,14 @@
  * 1. Layer 1: Strict Zod schema validation on all incoming webhooks.
  * 2. Layer 2: Semantic on-chain validation via Qubic RPC.
  * 3. Layer 3: Replay attack protection by logging processed txIds.
- **/
+ * 
+ * NOTE: Ensure your Prisma schema includes a new model for processed transactions:
+ * model ProcessedTransaction {
+ *   id        String   @id @default(cuid())
+ *   txId      String   @unique
+ *   createdAt DateTime @default(now())
+ * }
+ */
 
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, MessageFlags } = require('discord.js');
@@ -38,12 +45,13 @@ const WHALE_THRESHOLD = 1000000000n;
 
 // --- LAYER 1: ZOD SCHEMA DEFINITION (COMPLETE & ACCURATE) ---
 // This schema now perfectly mirrors the real EasyConnect payload structure.
+// Updated sourceId regex to allow 52-60 characters for wallet addresses and smart contract addresses, based on Qubic protocol (confirmed via explorer).
 const easyConnectSchema = z.object({
     ProcedureTypeName: z.literal("AddToBidOrder"),
     ProcedureTypeValue: z.literal(6),
     RawTransaction: z.object({
         transaction: z.object({
-            sourceId: z.string().regex(/^[A-Z2-7]{52}$/),
+            sourceId: z.string().regex(/^[A-Z2-7]{52,60}$/), // Allows 52-60 chars for wallets and contracts
             destId: z.string(),
             amount: z.string().regex(/^\d+$/),
             tickNumber: z.number().int().positive(),

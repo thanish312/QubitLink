@@ -19,9 +19,8 @@ const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events, Me
 const { PrismaClient } = require('@prisma/client');
 const express = require('express');
 const cron = require('node-cron');
-const { z } = require('zod'); // NEW: Schema validation library
+const { z } = require('zod');
 
-// --- SETUP ---
 const prisma = new PrismaClient();
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] 
@@ -31,30 +30,40 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// --- CONFIGURATION ---
 const ROLES = {
     VERIFIED: process.env.VERIFIED_ROLE_ID,
     WHALE: process.env.WHALE_ROLE_ID
 };
-const WHALE_THRESHOLD = 1000000000n; // 1 Billion Qubic (BigInt)
+const WHALE_THRESHOLD = 1000000000n;
 
-// --- LAYER 1: ZOD SCHEMA DEFINITION ---
-// This schema defines the exact structure of a valid EasyConnect payload.
+// --- LAYER 1: ZOD SCHEMA DEFINITION (COMPLETE & ACCURATE) ---
+// This schema now perfectly mirrors the real EasyConnect payload structure.
 const easyConnectSchema = z.object({
     ProcedureTypeName: z.literal("AddToBidOrder"),
     ProcedureTypeValue: z.literal(6),
     RawTransaction: z.object({
         transaction: z.object({
-            sourceId: z.string().regex(/^[A-Z2-7]{52}$/), // Qubic address format
-            amount: z.string().regex(/^\d+$/), // String of digits
+            sourceId: z.string().regex(/^[A-Z2-7]{52}$/),
+            destId: z.string(),
+            amount: z.string().regex(/^\d+$/),
+            tickNumber: z.number().int().positive(),
+            inputType: z.number().int(),
+            inputSize: z.number().int(),
+            inputHex: z.string(),
+            signatureHex: z.string(),
             txId: z.string().length(60)
-        })
+        }),
+        timestamp: z.string(),
+        moneyFlew: z.boolean()
+    }),
+    ParsedTransaction: z.object({
+        IssuerAddress: z.string(),
+        AssetName: z.string(),
+        Price: z.number(),
+        NumberOfShares: z.number()
     })
-}).strict(); // .strict() rejects any payload with extra, unexpected fields.
+}).strict();
 
-// --- HELPER FUNCTIONS ---
-
-// 1. Fetch Balance safely (Returns BigInt)
 async function getQubicBalance(address) {
     try {
         const response = await fetch(`https://rpc.qubic.org/v1/balances/${address}`);
@@ -62,121 +71,102 @@ async function getQubicBalance(address) {
         const data = await response.json();
         return BigInt(data.balance.balance || 0); 
     } catch (error) {
-        console.error(`⚠️ API Error for ${address.substring(0,8)}...: ${error.message}`);
+        console.error(`API Error for ${address.substring(0,8)}...: ${error.message}`);
         return 0n;
     }
 }
 
-// 2. Safe Role Assignment (Prevents crashes if Bot is lower rank)
 async function addRoleSafe(member, roleId, roleName) {
     if (!roleId) return;
     try {
-        if (member.roles.cache.has(roleId)) return; // Already has it
+        if (member.roles.cache.has(roleId)) return;
         await member.roles.add(roleId);
-        console.log(`✅ Role Added: ${roleName} -> ${member.user.tag}`);
+        console.log(`Role Added: ${roleName} -> ${member.user.tag}`);
     } catch (error) {
-        console.error(`❌ PERMISSION ERROR: Cannot add ${roleName} to ${member.user.tag}.`);
-        console.error(`   -> Check Discord Server Settings > Roles.`);
-        console.error(`   -> Move 'QubicLink' ABOVE '${roleName}'.`);
+        console.error(`Permission Error: Cannot add ${roleName} to ${member.user.tag}. Check Discord Server Settings > Roles. Move 'QubicLink' ABOVE '${roleName}'.`);
     }
 }
 
-// 3. Safe Role Removal
 async function removeRoleSafe(member, roleId, roleName) {
     if (!roleId) return;
     try {
-        if (!member.roles.cache.has(roleId)) return; // Doesn't have it
+        if (!member.roles.cache.has(roleId)) return;
         await member.roles.remove(roleId);
-        console.log(`📉 Role Removed: ${roleName} <- ${member.user.tag}`);
+        console.log(`Role Removed: ${roleName} <- ${member.user.tag}`);
     } catch (error) {
-        console.error(`❌ PERMISSION ERROR: Cannot remove ${roleName}. Check Hierarchy.`);
+        console.error(`Permission Error: Cannot remove ${roleName}. Check Hierarchy.`);
     }
 }
 
-// 4. Sleep (Rate Limiter)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Safe defer helper to avoid "Interaction has already been acknowledged" errors
 async function safeDeferReply(interaction) {
     if (!interaction || interaction.deferred || interaction.replied) return;
     try {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     } catch (err) {
-        if (err && err.code === 40060) return; // already acknowledged
+        if (err && err.code === 40060) return;
         console.error('DeferReply Error:', err);
     }
 }
 
-// --- LAYER 2: ON-CHAIN VERIFICATION HELPER ---
 async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
     try {
-        console.log(`[L2] Verifying txId ${txId.substring(0,8)}... on-chain...`);
+        console.log(`Verifying txId ${txId.substring(0,8)}... on-chain...`);
         const response = await fetch(`https://rpc.qubic.org/v1/transactions/${txId}`);
         if (!response.ok) {
-            console.warn(`[L2] ⚠️ RPC lookup failed for txId ${txId}.`);
+            console.warn(`RPC lookup failed for txId ${txId}.`);
             return false;
         }
         const onChainTx = await response.json();
 
-        // Compare webhook data with live on-chain data
         const isSourceValid = onChainTx.sourceId === expectedSource;
-        const isAmountValid = onChainTx.amount === expectedAmount; // Amounts are strings
+        const isAmountValid = onChainTx.amount === expectedAmount;
 
         if (!isSourceValid || !isAmountValid) {
-            console.warn(`[L2] ⚠️ Semantic Mismatch for ${txId}!`);
-            console.warn(`     -> Expected: ${expectedSource} | ${expectedAmount}`);
-            console.warn(`     -> On-Chain: ${onChainTx.sourceId} | ${onChainTx.amount}`);
+            console.warn(`Semantic Mismatch for ${txId}!`);
+            console.warn(`Expected: ${expectedSource} | ${expectedAmount}`);
+            console.warn(`On-Chain: ${onChainTx.sourceId} | ${onChainTx.amount}`);
             return false;
         }
 
-        console.log(`[L2] ✅ On-chain data matches.`);
+        console.log(`On-chain data matches.`);
         return true;
     } catch (error) {
-        console.error('[L2] Critical RPC Error:', error);
+        console.error('Critical RPC Error:', error);
         return false;
     }
 }
 
-// ==========================================
-// 1. CRON JOB (THE SELF-HEALING SYSTEM)
-// ==========================================
-// Runs every 30 minutes to ensure data is fresh and roles are correct
 cron.schedule('*/30 * * * *', async () => {
-    console.log('⏰ CRON: Starting Portfolio Refresh...');
+    console.log('Starting Portfolio Refresh...');
     try {
-        // Find users with at least one verified wallet
         const verifiedWallets = await prisma.wallet.findMany({ 
             where: { isVerified: true },
-            select: { userId: true } // Only need User IDs
+            select: { userId: true }
         });
         
-        // Get unique User IDs
         const uniqueUserIds = [...new Set(verifiedWallets.map(w => w.userId))];
         const guild = await client.guilds.fetch(process.env.GUILD_ID);
 
-        console.log(`🔍 Checking ${uniqueUserIds.length} Users...`);
+        console.log(`Checking ${uniqueUserIds.length} Users...`);
 
         for (const userId of uniqueUserIds) {
             try {
-                // Fetch Discord Member
                 const member = await guild.members.fetch(userId).catch(() => null);
-                if (!member) continue; // User left the server
+                if (!member) continue;
 
-                // Calculate Total Net Worth
                 const userWallets = await prisma.wallet.findMany({ where: { userId: userId, isVerified: true } });
                 let totalNetWorth = 0n;
 
                 for (const wallet of userWallets) {
                     const balance = await getQubicBalance(wallet.address);
                     totalNetWorth += balance;
-                    await sleep(200); // 200ms delay to be nice to API
+                    await sleep(200);
                 }
 
-                // SYNC ROLES
-                // 1. Ensure Verified Role
                 await addRoleSafe(member, ROLES.VERIFIED, "VERIFIED");
 
-                // 2. Check Whale Status
                 if (totalNetWorth >= WHALE_THRESHOLD) {
                     await addRoleSafe(member, ROLES.WHALE, "WHALE");
                 } else {
@@ -187,58 +177,49 @@ cron.schedule('*/30 * * * *', async () => {
                 console.error(`Skipped user ${userId}: ${err.message}`);
             }
         }
-        console.log('✅ CRON: Refresh Complete.');
+        console.log('Refresh Complete.');
     } catch (error) {
-        console.error('🔥 CRON CRITICAL FAILURE:', error);
+        console.error('Critical Failure:', error);
     }
 });
 
-// ==========================================
-// 2. THE SECURE WEBHOOK (Now handles batches)
-// ==========================================
 app.post('/webhook/qubic', async (req, res) => {
-    // 1. The webhook body is now an ARRAY of transactions.
     const batch = req.body;
     
-    // Ensure the body is an array before we try to loop.
     if (!Array.isArray(batch)) {
         return res.status(400).send('Expected an array of transactions.');
     }
 
-    console.log(`🔔 Webhook Batch Received: ${batch.length} transaction(s).`);
+    console.log(`Webhook Batch Received: ${batch.length} transaction(s).`);
 
     for (const payload of batch) {
         try {
-            // --- 🛡️ LAYER 1: STRICT PAYLOAD SCHEMA VALIDATION ---
             const validationResult = easyConnectSchema.safeParse(payload);
             if (!validationResult.success) {
-                console.warn(`[L1] ⚠️ Invalid Schema in batch item. Skipping.`);
-                continue; // Skip this item and move to the next in the batch
+                console.warn(`Invalid Schema in batch item. Skipping.`);
+                continue;
             }
             const validatedPayload = validationResult.data;
             const tx = validatedPayload.RawTransaction.transaction;
 
-            // --- 🛡️ LAYER 3: REPLAY ATTACK PROTECTION ---
             try {
                 await prisma.processedTransaction.create({
                     data: { txId: tx.txId }
                 });
             } catch (error) {
                 if (error.code === 'P2002') {
-                    console.warn(`[L3] ⚠️ Replay Detected. Skipping txId ${tx.txId.substring(0,8)}...`);
+                    console.warn(`Replay Detected. Skipping txId ${tx.txId.substring(0,8)}...`);
                     continue;
                 }
                 throw error;
             }
 
-            // --- 🛡️ LAYER 2: ON-CHAIN VALIDATION ---
             const isOnChainValid = await verifyTransactionOnChain(tx.txId, tx.sourceId, tx.amount);
             if (!isOnChainValid) {
-                console.warn(`[L2] ⚠️ On-chain validation failed. Skipping txId ${tx.txId.substring(0,8)}...`);
+                console.warn(`On-chain validation failed. Skipping txId ${tx.txId.substring(0,8)}...`);
                 continue;
             }
 
-            // --- ✅ ALL SECURITY CHECKS PASSED ---
             const walletAddress = tx.sourceId;
             const bidAmount = parseInt(tx.amount, 10);
 
@@ -251,32 +232,28 @@ app.post('/webhook/qubic', async (req, res) => {
             });
 
             if (challenge) {
-                console.log(`[CORE] ✅ MATCH FOUND! Processing for ${challenge.discordId}`);
+                console.log(`Match Found! Processing for ${challenge.discordId}`);
 
-                // SECURITY: Check if wallet is verified by SOMEONE ELSE
                 const existingWallet = await prisma.wallet.findUnique({ where: { address: walletAddress } });
                 
                 if (existingWallet && existingWallet.userId !== challenge.discordId && existingWallet.isVerified) {
-                    console.warn(`⚠️ BLOCKED: Wallet stolen attempt by ${challenge.discordId}`);
-                    await prisma.challenge.delete({ where: { id: challenge.id } }); // Delete the hacker's challenge
-                    continue; // Skip to next in batch
+                    console.warn(`Blocked: Wallet stolen attempt by ${challenge.discordId}`);
+                    await prisma.challenge.delete({ where: { id: challenge.id } });
+                    continue;
                 }
 
-                // DB UPDATE: Verify the wallet
                 await prisma.wallet.upsert({
                     where: { address: walletAddress },
                     update: { isVerified: true, verifiedAt: new Date(), userId: challenge.discordId },
                     create: { address: walletAddress, userId: challenge.discordId, isVerified: true, verifiedAt: new Date() }
                 });
 
-                // INSTANT PORTFOLIO CALCULATION (Don't wait for Cron)
                 const allWallets = await prisma.wallet.findMany({ where: { userId: challenge.discordId, isVerified: true } });
                 let total = 0n;
                 for (const w of allWallets) { 
                     total += await getQubicBalance(w.address); 
                 }
 
-                // INSTANT ROLE ASSIGNMENT
                 try {
                     const guild = await client.guilds.fetch(process.env.GUILD_ID);
                     const member = await guild.members.fetch(challenge.discordId);
@@ -287,30 +264,23 @@ app.post('/webhook/qubic', async (req, res) => {
                         await addRoleSafe(member, ROLES.WHALE, "WHALE");
                     }
 
-                    // Send DM
                     await member.send({
-                        content: `## 🚀 Verification Successful!\n\n**Wallet:** \`${walletAddress}\`\n**Portfolio:** ${allWallets.length} Wallet(s)\n**Net Worth:** \`${total.toString()} QUBIC\`\n\n*Your roles have been updated instantly.*`
+                        content: `## Verification Successful!\n\n**Wallet:** \`${walletAddress}\`\n**Portfolio:** ${allWallets.length} Wallet(s)\n**Net Worth:** \`${total.toString()} QUBIC\`\n\n*Your roles have been updated instantly.*`
                     }).catch(() => console.log(`Couldn't DM user ${challenge.discordId}`));
 
                 } catch (err) { console.error('Discord Action Failed:', err.message); }
 
-                // Cleanup Challenges
                 await prisma.challenge.deleteMany({ where: { walletAddress: walletAddress } });
             }
 
         } catch (error) {
-            console.error('🔥 Error processing a batch item:', error);
-            // We continue the loop even if one item fails
+            console.error('Error processing a batch item:', error);
         }
     }
 
-    // After processing the whole batch, send a final response.
     res.status(200).send('Batch processed');
 });
 
-// ==========================================
-// 3. DISCORD BOT COMMANDS
-// ==========================================
 const commands = [
     new SlashCommandBuilder()
         .setName('link')
@@ -326,17 +296,16 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 client.once(Events.ClientReady, async c => {
-    console.log(`🤖 Bot Logged in as ${c.user.tag}`);
+    console.log(`Bot Logged in as ${c.user.tag}`);
     try {
         await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
-        console.log('✨ Slash commands loaded.');
+        console.log('Slash commands loaded.');
     } catch (err) { console.error(err); }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // --- COMMAND: /PORTFOLIO ---
     if (interaction.commandName === 'portfolio') {
         try {
             await safeDeferReply(interaction);
@@ -354,51 +323,45 @@ client.on(Events.InteractionCreate, async interaction => {
             const list = (await Promise.all(listPromises)).join('\n');
 
             await interaction.editReply({
-                content: `### 💼 Your Portfolio\n\n${list}\n\n**Total Net Worth:** \`${totalBalance.toString()} QUBIC\``
+                content: `### Your Portfolio\n\n${list}\n\n**Total Net Worth:** \`${totalBalance.toString()} QUBIC\``
             });
         } catch (e) { if(e.code !== 10062) console.error(e); }
     }
 
-    // --- COMMAND: /LINK ---
     if (interaction.commandName === 'link') {
         try {
-            // SAFETY NET START
             await safeDeferReply(interaction);
 
             const walletInput = interaction.options.getString('wallet').trim().toUpperCase();
             const discordId = interaction.user.id;
 
-            // 1. Upsert User
             await prisma.user.upsert({ where: { discordId }, update: {}, create: { discordId } });
 
-            // 2. Security: Check if taken
             const existingWallet = await prisma.wallet.findUnique({ where: { address: walletInput } });
             
             if (existingWallet && existingWallet.userId !== discordId && existingWallet.isVerified) {
-                return interaction.editReply(`❌ **Access Denied.** Wallet verified by another user.`);
+                return interaction.editReply(`Access Denied. Wallet verified by another user.`);
             }
             if (existingWallet && existingWallet.userId === discordId && existingWallet.isVerified) {
-                return interaction.editReply(`✅ **Already Linked.** This wallet is in your portfolio.`);
+                return interaction.editReply(`Already Linked. This wallet is in your portfolio.`);
             }
 
-            // 3. Add to Portfolio (Pending)
             await prisma.wallet.upsert({
                 where: { address: walletInput },
                 update: { userId: discordId },
                 create: { address: walletInput, userId: discordId }
             });
 
-            // 4. Challenge Logic
             let signalCode;
             const active = await prisma.challenge.findFirst({
                 where: { discordId, walletAddress: walletInput, expiresAt: { gt: new Date() } },
                 orderBy: { createdAt: 'desc' }
             });
 
-            let statusMsg = "🔒 **Secure Link Initiated**";
+            let statusMsg = "Secure Link Initiated";
             if (active) {
                 signalCode = active.signalCode;
-                statusMsg = "⚠️ **Active Challenge Found**";
+                statusMsg = "Active Challenge Found";
             } else {
                 signalCode = Math.floor(Math.random() * (99000 - 30000) + 30000);
                 await prisma.challenge.create({
@@ -408,18 +371,17 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const expiryUnix = Math.floor((Date.now() + 600000) / 1000);
             await interaction.editReply({
-                content: `### ${statusMsg}\n**Signal Code:** \`${signalCode}\`\n**Wallet:** \`${walletInput}\`\n\n👉 *Place a Limit Bid for **${signalCode} QUBIC**.*\n⏳ *Expires <t:${expiryUnix}:R>*`
+                content: `### ${statusMsg}\n**Signal Code:** \`${signalCode}\`\n**Wallet:** \`${walletInput}\`\n\n*Place a Limit Bid for **${signalCode} QUBIC**.*\n*Expires <t:${expiryUnix}:R>*`
             });
 
         } catch (error) {
-            if (error.code !== 10062) { // Ignore Timeout/Unknown Interaction
+            if (error.code !== 10062) {
                 console.error('Link Cmd Error:', error);
-                await interaction.editReply({ content: '❌ System Error.' }).catch(() => {});
+                await interaction.editReply({ content: 'System Error.' }).catch(() => {});
             }
         }
     }
 });
 
-// --- STARTUP ---
-app.listen(PORT, () => console.log(`🌍 Webhook Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Webhook Server running on port ${PORT}`));
 client.login(process.env.DISCORD_TOKEN);

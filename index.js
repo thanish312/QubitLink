@@ -1,17 +1,17 @@
 /**
- * QubicLink V2 - COMPLETE PRODUCTION BUILD
+ * QubicLink V2 - Production Wallet Verification System
  * 
- * FAILURE PROTECTIONS:
- * 1. Anti-Crash: All Discord interactions wrapped in try/catch.
- * 2. Anti-Scam: "First to Verify" wins. Stolen wallets are blocked.
- * 3. Type Safety: BigInt for all balances.
- * 4. Hierarchy Safety: Checks permissions before adding roles.
- * 5. Rate Limiting: Sleep functions to prevent API bans.
+ * Multi-layer security architecture for Discord wallet verification:
+ * - Layer 1: Zod schema validation
+ * - Layer 2: On-chain RPC verification
+ * - Layer 3: Replay attack protection
  * 
- * SECURITY UPGRADES:
- * 1. Layer 1: Strict Zod schema validation on all incoming webhooks.
- * 2. Layer 2: Semantic on-chain validation via Qubic RPC (FIXED).
- * 3. Layer 3: Replay attack protection by logging processed txIds.
+ * @requires dotenv ^16.0.0
+ * @requires discord.js ^14.0.0
+ * @requires @prisma/client ^5.0.0
+ * @requires express ^4.18.0
+ * @requires node-cron ^3.0.0
+ * @requires zod ^3.22.0
  */
 
 require('dotenv').config();
@@ -20,8 +20,8 @@ const { PrismaClient } = require('@prisma/client');
 const express = require('express');
 const cron = require('node-cron');
 const { z } = require('zod');
+const crypto = require('crypto');
 
-// --- SETUP ---
 const prisma = new PrismaClient();
 const client = new Client({ 
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] 
@@ -31,21 +31,30 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// --- CONFIGURATION ---
-const ROLES = {
-    VERIFIED: process.env.VERIFIED_ROLE_ID,
-    WHALE: process.env.WHALE_ROLE_ID
+// Configuration Constants
+const CONFIG = {
+    ROLES: {
+        VERIFIED: process.env.VERIFIED_ROLE_ID,
+        WHALE: process.env.WHALE_ROLE_ID
+    },
+    WHALE_THRESHOLD: 1000000000n,
+    QUBIC_RPC_URL: 'https://rpc.qubic.org',
+    CHALLENGE_EXPIRY_MS: 600000, // 10 minutes
+    SIGNAL_CODE_MIN: 10000,
+    SIGNAL_CODE_MAX: 99999,
+    QUBIC_TO_USD: 0.0000006021,
+    USD_TO_INR: 83,
+    RATE_LIMIT_DELAY_MS: 200
 };
-const WHALE_THRESHOLD = 1000000000n;
 
-// --- LAYER 1: ZOD SCHEMA DEFINITION ---
+// Webhook Payload Schema
 const easyConnectSchema = z.object({
-    ProcedureTypeName: z.literal("AddToBidOrder"),
-    ProcedureTypeValue: z.literal(6),
+    ProcedureTypeName: z.string(),
+    ProcedureTypeValue: z.number().int(),
     RawTransaction: z.object({
         transaction: z.object({
             sourceId: z.string().regex(/^[A-Z2-7]{52,60}$/),
-            destId: z.string(),
+            destId: z.string().regex(/^[A-Z2-7]{52,60}$/),
             amount: z.string().regex(/^\d+$/),
             tickNumber: z.number().int().positive(),
             inputType: z.number().int(),
@@ -65,96 +74,149 @@ const easyConnectSchema = z.object({
     })
 }).strict();
 
-// --- HELPER FUNCTIONS ---
+/**
+ * Cryptographically secure random integer generator
+ * Uses crypto.randomBytes for unbiased distribution
+ */
+function secureRandomInt(min, max) {
+    const range = max - min + 1;
+    const bytesNeeded = Math.ceil(Math.log2(range) / 8);
+    const maxValue = Math.pow(256, bytesNeeded);
+    const threshold = maxValue - (maxValue % range);
+    
+    let randomValue;
+    do {
+        const randomBytes = crypto.randomBytes(bytesNeeded);
+        randomValue = 0;
+        for (let i = 0; i < bytesNeeded; i++) {
+            randomValue = (randomValue << 8) | randomBytes[i];
+        }
+    } while (randomValue >= threshold);
+    
+    return min + (randomValue % range);
+}
+
+/**
+ * Fetches on-chain balance for a Qubic wallet address
+ */
 async function getQubicBalance(address) {
     try {
-        const response = await fetch(`https://rpc.qubic.org/v1/balances/${address}`);
-        if (!response.ok) return 0n;
+        const response = await fetch(`${CONFIG.QUBIC_RPC_URL}/v1/balances/${address}`);
+        if (!response.ok) {
+            console.warn(`Balance API returned ${response.status} for ${address.substring(0,8)}...`);
+            return 0n;
+        }
         const data = await response.json();
-        return BigInt(data.balance.balance || 0); 
+        return BigInt(data.balance?.balance || 0);
     } catch (error) {
-        console.error(`API Error for ${address.substring(0,8)}...: ${error.message}`);
+        console.error(`Balance fetch failed for ${address.substring(0,8)}...: ${error.message}`);
         return 0n;
     }
 }
 
+/**
+ * Safely adds role to Discord member with hierarchy checks
+ */
 async function addRoleSafe(member, roleId, roleName) {
-    if (!roleId) return;
+    if (!roleId) {
+        console.warn(`Role ID missing for ${roleName}`);
+        return;
+    }
+    
     try {
-        if (member.roles.cache.has(roleId)) return;
+        if (member.roles.cache.has(roleId)) {
+            return;
+        }
         await member.roles.add(roleId);
-        console.log(`✅ Role Added: ${roleName} -> ${member.user.tag}`);
+        console.info(`Role assigned: ${roleName} → ${member.user.tag} (${member.id})`);
     } catch (error) {
-        console.error(`⚠️ Permission Error: Cannot add ${roleName} to ${member.user.tag}. Check Discord Server Settings > Roles. Move 'QubicLink' ABOVE '${roleName}'.`);
+        console.error(`Role assignment failed: ${roleName} → ${member.user.tag}. Error: ${error.message}. Check bot role hierarchy.`);
     }
 }
 
+/**
+ * Safely removes role from Discord member
+ */
 async function removeRoleSafe(member, roleId, roleName) {
     if (!roleId) return;
+    
     try {
-        if (!member.roles.cache.has(roleId)) return;
+        if (!member.roles.cache.has(roleId)) {
+            return;
+        }
         await member.roles.remove(roleId);
-        console.log(`🔻 Role Removed: ${roleName} <- ${member.user.tag}`);
+        console.info(`Role removed: ${roleName} ← ${member.user.tag} (${member.id})`);
     } catch (error) {
-        console.error(`⚠️ Permission Error: Cannot remove ${roleName}. Check Hierarchy.`);
+        console.error(`Role removal failed: ${roleName} ← ${member.user.tag}. Error: ${error.message}`);
     }
 }
 
+/**
+ * Rate limiting utility
+ */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Safely defers Discord interaction reply
+ */
 async function safeDeferReply(interaction) {
     if (!interaction || interaction.deferred || interaction.replied) return;
+    
     try {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     } catch (err) {
-        if (err && err.code === 40060) return;
-        console.error('DeferReply Error:', err);
+        if (err?.code === 40060) return;
+        console.error(`Defer reply failed: ${err.message}`);
     }
 }
 
-// --- LAYER 2: ON-CHAIN VERIFICATION HELPER (FIXED) ---
+/**
+ * Layer 2: Verifies transaction authenticity via on-chain RPC
+ */
 async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
     try {
-        console.log(`[L2] 🔍 Verifying txId ${txId.substring(0,8)}... on-chain...`);
-        const response = await fetch(`https://rpc.qubic.org/v1/transactions/${txId}`);
+        console.info(`[Layer 2] Verifying transaction: ${txId.substring(0,12)}...`);
+        
+        const response = await fetch(`${CONFIG.QUBIC_RPC_URL}/v1/transactions/${txId}`);
         if (!response.ok) {
-            console.warn(`[L2] ⚠️ RPC lookup failed for txId ${txId}.`);
+            console.warn(`[Layer 2] RPC returned ${response.status} for ${txId.substring(0,12)}...`);
             return false;
         }
         
-        // --- THE CRITICAL FIX ---
         const rpcResponse = await response.json();
-        const onChainTx = rpcResponse.transaction; // The real data is nested here.
+        const onChainTx = rpcResponse.transaction;
         
         if (!onChainTx) {
-            console.warn(`[L2] ⚠️ No transaction data found on-chain for txId ${txId}.`);
-            return false;
-        }
-        // --- END OF FIX ---
-
-        const isSourceValid = onChainTx.sourceId === expectedSource;
-        const isAmountValid = onChainTx.amount === expectedAmount;
-
-        if (!isSourceValid || !isAmountValid) {
-            console.warn(`[L2] ⚠️ Semantic Mismatch for ${txId}!`);
-            console.warn(`     -> Expected: ${expectedSource} | ${expectedAmount}`);
-            console.warn(`     -> On-Chain: ${onChainTx.sourceId} | ${onChainTx.amount}`);
+            console.warn(`[Layer 2] No transaction data found on-chain for ${txId.substring(0,12)}...`);
             return false;
         }
 
-        console.log(`[L2] ✅ On-chain data matches.`);
+        const sourceMatch = onChainTx.sourceId === expectedSource;
+        const amountMatch = onChainTx.amount === expectedAmount;
+
+        if (!sourceMatch || !amountMatch) {
+            console.warn(`[Layer 2] Semantic mismatch detected:`);
+            console.warn(`  Expected: source=${expectedSource.substring(0,12)}..., amount=${expectedAmount}`);
+            console.warn(`  On-chain: source=${onChainTx.sourceId.substring(0,12)}..., amount=${onChainTx.amount}`);
+            return false;
+        }
+
+        console.info(`[Layer 2] Transaction verified successfully`);
         return true;
     } catch (error) {
-        console.error('[L2] Critical RPC Error:', error);
+        console.error(`[Layer 2] RPC verification error: ${error.message}`);
         return false;
     }
 }
 
-// ==========================================
-// 1. CRON JOB (Self-Healing System)
-// ==========================================
+/**
+ * Scheduled portfolio refresh and role synchronization
+ * Runs every 30 minutes to update user roles based on wallet balances
+ */
 cron.schedule('*/30 * * * *', async () => {
-    console.log('🔄 Starting Portfolio Refresh...');
+    console.info('=== Portfolio Refresh Started ===');
+    const startTime = Date.now();
+    
     try {
         const verifiedWallets = await prisma.wallet.findMany({ 
             where: { isVerified: true },
@@ -164,168 +226,219 @@ cron.schedule('*/30 * * * *', async () => {
         const uniqueUserIds = [...new Set(verifiedWallets.map(w => w.userId))];
         const guild = await client.guilds.fetch(process.env.GUILD_ID);
 
-        console.log(`📊 Checking ${uniqueUserIds.length} Users...`);
+        console.info(`Processing ${uniqueUserIds.length} verified users`);
+
+        let processed = 0;
+        let errors = 0;
 
         for (const userId of uniqueUserIds) {
             try {
                 const member = await guild.members.fetch(userId).catch(() => null);
-                if (!member) continue;
+                if (!member) {
+                    console.debug(`User ${userId} not found in guild, skipping`);
+                    continue;
+                }
 
                 const userWallets = await prisma.wallet.findMany({ 
                     where: { userId: userId, isVerified: true } 
                 });
+                
                 let totalNetWorth = 0n;
-
                 for (const wallet of userWallets) {
                     const balance = await getQubicBalance(wallet.address);
                     totalNetWorth += balance;
-                    await sleep(200);
+                    await sleep(CONFIG.RATE_LIMIT_DELAY_MS);
                 }
 
-                await addRoleSafe(member, ROLES.VERIFIED, "VERIFIED");
+                await addRoleSafe(member, CONFIG.ROLES.VERIFIED, "VERIFIED");
 
-                if (totalNetWorth >= WHALE_THRESHOLD) {
-                    await addRoleSafe(member, ROLES.WHALE, "WHALE");
+                if (totalNetWorth >= CONFIG.WHALE_THRESHOLD) {
+                    await addRoleSafe(member, CONFIG.ROLES.WHALE, "WHALE");
                 } else {
-                    await removeRoleSafe(member, ROLES.WHALE, "WHALE");
+                    await removeRoleSafe(member, CONFIG.ROLES.WHALE, "WHALE");
                 }
 
+                processed++;
             } catch (err) {
-                console.error(`⚠️ Skipped user ${userId}: ${err.message}`);
+                errors++;
+                console.error(`Error processing user ${userId}: ${err.message}`);
             }
         }
-        console.log('✅ Refresh Complete.');
+
+        const duration = Date.now() - startTime;
+        console.info(`=== Portfolio Refresh Complete ===`);
+        console.info(`Processed: ${processed}, Errors: ${errors}, Duration: ${duration}ms`);
     } catch (error) {
-        console.error('🔥 Critical Failure:', error);
+        console.error(`Portfolio refresh critical failure: ${error.message}`);
     }
 });
 
-// ==========================================
-// 2. THE SECURE WEBHOOK
-// ==========================================
+/**
+ * Webhook endpoint for EasyConnect transaction notifications
+ */
 app.post('/webhook/qubic', async (req, res) => {
-    const batch = req.body;
+    const requestId = crypto.randomBytes(4).toString('hex');
+    console.info(`[${requestId}] Webhook request received`);
     
-    if (!Array.isArray(batch)) {
-        return res.status(400).send('Expected an array of transactions.');
-    }
+    const batch = req.body;
+    const transactions = Array.isArray(batch) ? batch : [batch];
 
-    console.log(`📬 Webhook Batch Received: ${batch.length} transaction(s).`);
+    console.info(`[${requestId}] Processing ${transactions.length} transaction(s)`);
 
-    for (const payload of batch) {
+    let processed = 0;
+    let skipped = 0;
+
+    for (const payload of transactions) {
         try {
-            // --- 🛡️ LAYER 1: SCHEMA VALIDATION ---
+            // Layer 1: Schema Validation
             const validationResult = easyConnectSchema.safeParse(payload);
             if (!validationResult.success) {
-                console.warn(`[L1] ⚠️ Invalid Schema. Skipping.`);
+                console.warn(`[${requestId}] [Layer 1] Schema validation failed:`, validationResult.error.errors[0]);
+                skipped++;
                 continue;
             }
+            
             const validatedPayload = validationResult.data;
             const tx = validatedPayload.RawTransaction.transaction;
+            const parsed = validatedPayload.ParsedTransaction;
 
-            // --- 🛡️ LAYER 3: REPLAY ATTACK PROTECTION ---
+            console.info(`[${requestId}] [Layer 1] Valid schema - txId: ${tx.txId.substring(0,12)}...`);
+            console.debug(`[${requestId}] Transaction details: ${parsed.NumberOfShares} ${parsed.AssetName} @ ${parsed.Price} QU from ${tx.sourceId.substring(0,12)}...`);
+
+            // Layer 3: Replay Protection
             try {
                 await prisma.processedTransaction.create({
                     data: { txId: tx.txId }
                 });
+                console.info(`[${requestId}] [Layer 3] Transaction logged as processed`);
             } catch (error) {
                 if (error.code === 'P2002') {
-                    console.warn(`[L3] 🔁 Replay Detected. Skipping txId ${tx.txId.substring(0,8)}...`);
+                    console.warn(`[${requestId}] [Layer 3] Replay attack detected - txId: ${tx.txId.substring(0,12)}...`);
+                    skipped++;
                     continue;
                 }
                 throw error;
             }
 
-            // --- 🛡️ LAYER 2: ON-CHAIN VERIFICATION ---
+            // Layer 2: On-chain Verification
             const isOnChainValid = await verifyTransactionOnChain(tx.txId, tx.sourceId, tx.amount);
             if (!isOnChainValid) {
-                console.warn(`[L2] ❌ On-chain validation failed. Skipping txId ${tx.txId.substring(0,8)}...`);
+                console.warn(`[${requestId}] [Layer 2] On-chain verification failed for txId: ${tx.txId.substring(0,12)}...`);
+                skipped++;
                 continue;
             }
 
-            // --- ✅ ALL CHECKS PASSED ---
+            // Challenge Matching
             const walletAddress = tx.sourceId;
-            const bidAmount = parseInt(tx.amount, 10);
+            const numberOfShares = parsed.NumberOfShares;
+
+            console.info(`[${requestId}] Searching for challenge: wallet=${walletAddress.substring(0,12)}..., shares=${numberOfShares}`);
 
             const challenge = await prisma.challenge.findFirst({
                 where: {
                     walletAddress: walletAddress,
-                    signalCode: bidAmount,
+                    signalCode: numberOfShares,
                     expiresAt: { gt: new Date() }
                 },
             });
 
-            if (challenge) {
-                console.log(`[CORE] ✅ Match Found! Processing for ${challenge.discordId}`);
-
-                const existingWallet = await prisma.wallet.findUnique({ 
-                    where: { address: walletAddress } 
-                });
-                
-                if (existingWallet && existingWallet.userId !== challenge.discordId && existingWallet.isVerified) {
-                    console.warn(`[SECURITY] 🚫 Blocked: Wallet stolen attempt by ${challenge.discordId}`);
-                    await prisma.challenge.delete({ where: { id: challenge.id } });
-                    continue;
-                }
-
-                await prisma.wallet.upsert({
-                    where: { address: walletAddress },
-                    update: { 
-                        isVerified: true, 
-                        verifiedAt: new Date(), 
-                        userId: challenge.discordId 
-                    },
-                    create: { 
-                        address: walletAddress, 
-                        userId: challenge.discordId, 
-                        isVerified: true, 
-                        verifiedAt: new Date() 
-                    }
-                });
-
-                const allWallets = await prisma.wallet.findMany({ 
-                    where: { userId: challenge.discordId, isVerified: true } 
-                });
-                let total = 0n;
-                for (const w of allWallets) { 
-                    total += await getQubicBalance(w.address);
-                    await sleep(200);
-                }
-
-                try {
-                    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-                    const member = await guild.members.fetch(challenge.discordId);
-                    
-                    await addRoleSafe(member, ROLES.VERIFIED, "VERIFIED");
-                    
-                    if (total >= WHALE_THRESHOLD) {
-                        await addRoleSafe(member, ROLES.WHALE, "WHALE");
-                    }
-
-                    await member.send({
-                        content: `## 🎉 Verification Successful!\n\n**Wallet:** \`${walletAddress}\`\n**Portfolio:** ${allWallets.length} Wallet(s)\n**Net Worth:** \`${total.toString()} QUBIC\`\n\n*Your roles have been updated instantly.*`
-                    }).catch(() => console.log(`⚠️ Couldn't DM user ${challenge.discordId}`));
-
-                } catch (err) { 
-                    console.error('Discord Action Failed:', err.message); 
-                }
-
-                await prisma.challenge.deleteMany({ 
-                    where: { walletAddress: walletAddress } 
-                });
+            if (!challenge) {
+                console.debug(`[${requestId}] No matching challenge found`);
+                skipped++;
+                continue;
             }
 
+            console.info(`[${requestId}] Challenge matched - User: ${challenge.discordId}`);
+
+            // Anti-theft Protection
+            const existingWallet = await prisma.wallet.findUnique({ 
+                where: { address: walletAddress } 
+            });
+            
+            if (existingWallet && existingWallet.userId !== challenge.discordId && existingWallet.isVerified) {
+                console.warn(`[${requestId}] Wallet theft attempt blocked - Wallet owned by ${existingWallet.userId}, attempted by ${challenge.discordId}`);
+                await prisma.challenge.delete({ where: { id: challenge.id } });
+                skipped++;
+                continue;
+            }
+
+            // Wallet Verification
+            await prisma.wallet.upsert({
+                where: { address: walletAddress },
+                update: { 
+                    isVerified: true, 
+                    verifiedAt: new Date(), 
+                    userId: challenge.discordId 
+                },
+                create: { 
+                    address: walletAddress, 
+                    userId: challenge.discordId, 
+                    isVerified: true, 
+                    verifiedAt: new Date() 
+                }
+            });
+
+            console.info(`[${requestId}] Wallet verified and saved to database`);
+
+            // Calculate Total Portfolio
+            const allWallets = await prisma.wallet.findMany({ 
+                where: { userId: challenge.discordId, isVerified: true } 
+            });
+            
+            let totalNetWorth = 0n;
+            for (const w of allWallets) { 
+                totalNetWorth += await getQubicBalance(w.address);
+                await sleep(CONFIG.RATE_LIMIT_DELAY_MS);
+            }
+
+            console.info(`[${requestId}] Portfolio calculated - User: ${challenge.discordId}, Wallets: ${allWallets.length}, Net Worth: ${totalNetWorth.toString()} QUBIC`);
+
+            // Discord Role Assignment
+            try {
+                const guild = await client.guilds.fetch(process.env.GUILD_ID);
+                const member = await guild.members.fetch(challenge.discordId);
+                
+                await addRoleSafe(member, CONFIG.ROLES.VERIFIED, "VERIFIED");
+                
+                if (totalNetWorth >= CONFIG.WHALE_THRESHOLD) {
+                    await addRoleSafe(member, CONFIG.ROLES.WHALE, "WHALE");
+                }
+
+                await member.send({
+                    content: `## 🎉 Verification Successful!\n\n**Wallet:** \`${walletAddress}\`\n**Transaction:** ${numberOfShares} ${parsed.AssetName} @ ${parsed.Price} QU\n**Portfolio:** ${allWallets.length} Wallet(s)\n**Net Worth:** \`${totalNetWorth.toString()} QUBIC\`\n\n*Your roles have been updated instantly.*`
+                }).catch(() => console.warn(`[${requestId}] Could not DM user ${challenge.discordId}`));
+
+                console.info(`[${requestId}] User notified and roles assigned`);
+            } catch (err) { 
+                console.error(`[${requestId}] Discord operations failed: ${err.message}`); 
+            }
+
+            // Cleanup
+            await prisma.challenge.deleteMany({ 
+                where: { walletAddress: walletAddress } 
+            });
+            
+            console.info(`[${requestId}] Challenge cleaned up`);
+            processed++;
+
         } catch (error) {
-            console.error('❌ Error processing a batch item:', error);
+            console.error(`[${requestId}] Transaction processing error:`, error);
+            skipped++;
         }
     }
 
-    res.status(200).send('Batch processed');
+    console.info(`[${requestId}] Webhook processing complete - Processed: ${processed}, Skipped: ${skipped}`);
+    res.status(200).json({ 
+        success: true, 
+        processed, 
+        skipped,
+        requestId 
+    });
 });
 
-// ==========================================
-// 3. DISCORD BOT COMMANDS
-// ==========================================
+/**
+ * Discord slash commands
+ */
 const commands = [
     new SlashCommandBuilder()
         .setName('link')
@@ -340,37 +453,52 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
+/**
+ * Bot ready event handler
+ */
 client.once(Events.ClientReady, async c => {
-    console.log(`🤖 Bot Logged in as ${c.user.tag}`);
+    console.info('=== QubicLink Bot Started ===');
+    console.info(`Bot User: ${c.user.tag} (${c.user.id})`);
+    console.info(`Guild ID: ${process.env.GUILD_ID}`);
+    
     try {
         await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), 
             { body: commands }
         );
-        console.log('✅ Slash commands loaded.');
+        console.info('Slash commands registered successfully');
     } catch (err) { 
-        console.error('❌ Command registration failed:', err); 
+        console.error('Slash command registration failed:', err.message); 
     }
 });
 
+/**
+ * Command interaction handler
+ */
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    const commandId = `${interaction.user.id}-${Date.now()}`;
+
     if (interaction.commandName === 'portfolio') {
+        console.info(`[${commandId}] Portfolio command - User: ${interaction.user.tag}`);
+        
         try {
             await safeDeferReply(interaction);
+            
             const wallets = await prisma.wallet.findMany({ 
                 where: { userId: interaction.user.id } 
             });
 
             if (wallets.length === 0) {
-                return interaction.editReply('You have no linked wallets. Use `/link`.');
+                console.debug(`[${commandId}] No wallets found`);
+                return interaction.editReply('You have no linked wallets. Use `/link` to add one.');
             }
 
             let totalBalance = 0n;
             const listPromises = wallets.map(async (w, i) => {
                 const bal = w.isVerified ? await getQubicBalance(w.address) : 0n;
-                if(w.isVerified) totalBalance += bal;
+                if (w.isVerified) totalBalance += bal;
                 return `${i+1}. \`${w.address.substring(0, 8)}...\` - ${w.isVerified ? '✅' : '⏳'} ${w.isVerified ? `(${bal.toString()} Q)` : ''}`;
             });
             
@@ -379,17 +507,25 @@ client.on(Events.InteractionCreate, async interaction => {
             await interaction.editReply({
                 content: `### 💼 Your Portfolio\n\n${list}\n\n**Total Net Worth:** \`${totalBalance.toString()} QUBIC\``
             });
+            
+            console.info(`[${commandId}] Portfolio displayed - Wallets: ${wallets.length}, Total: ${totalBalance.toString()}`);
         } catch (e) { 
-            if(e.code !== 10062) console.error(e); 
+            if (e.code !== 10062) {
+                console.error(`[${commandId}] Portfolio command error: ${e.message}`);
+            }
         }
     }
 
     if (interaction.commandName === 'link') {
+        console.info(`[${commandId}] Link command - User: ${interaction.user.tag}`);
+        
         try {
             await safeDeferReply(interaction);
 
             const walletInput = interaction.options.getString('wallet').trim().toUpperCase();
             const discordId = interaction.user.id;
+
+            console.debug(`[${commandId}] Wallet: ${walletInput.substring(0,12)}...`);
 
             await prisma.user.upsert({ 
                 where: { discordId }, 
@@ -402,10 +538,13 @@ client.on(Events.InteractionCreate, async interaction => {
             });
             
             if (existingWallet && existingWallet.userId !== discordId && existingWallet.isVerified) {
-                return interaction.editReply(`🚫 Access Denied. Wallet verified by another user.`);
+                console.warn(`[${commandId}] Wallet already verified by another user`);
+                return interaction.editReply('🚫 Access Denied. Wallet verified by another user.');
             }
+            
             if (existingWallet && existingWallet.userId === discordId && existingWallet.isVerified) {
-                return interaction.editReply(`✅ Already Linked. This wallet is in your portfolio.`);
+                console.debug(`[${commandId}] Wallet already linked to this user`);
+                return interaction.editReply('✅ Already Linked. This wallet is in your portfolio.');
             }
 
             await prisma.wallet.upsert({
@@ -428,34 +567,51 @@ client.on(Events.InteractionCreate, async interaction => {
             if (active) {
                 signalCode = active.signalCode;
                 statusMsg = "🔄 Active Challenge Found";
+                console.info(`[${commandId}] Reusing existing challenge: ${signalCode}`);
             } else {
-                signalCode = Math.floor(Math.random() * (99000 - 30000) + 30000);
+                signalCode = secureRandomInt(CONFIG.SIGNAL_CODE_MIN, CONFIG.SIGNAL_CODE_MAX);
+                
                 await prisma.challenge.create({
                     data: { 
                         discordId, 
                         walletAddress: walletInput, 
                         signalCode, 
-                        expiresAt: new Date(Date.now() + 600000) 
+                        expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) 
                     }
                 });
+                console.info(`[${commandId}] New challenge created: ${signalCode} shares`);
             }
 
-            const expiryUnix = Math.floor((Date.now() + 600000) / 1000);
+            const expiryUnix = Math.floor((Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) / 1000);
+            const costAt1QU = signalCode * 1;
+            const costInUSD = costAt1QU * CONFIG.QUBIC_TO_USD;
+            const costInINR = costInUSD * CONFIG.USD_TO_INR;
+            
             await interaction.editReply({
-                content: `### ${statusMsg}\n**Signal Code:** \`${signalCode}\`\n**Wallet:** \`${walletInput}\`\n\n📝 *Place a Limit Bid for **${signalCode} QUBIC**.*\n⏰ *Expires <t:${expiryUnix}:R>*`
+                content: `### ${statusMsg}\n**🔐 Verification Code:** \`${signalCode}\` shares\n**💼 Wallet:** \`${walletInput}\`\n**💰 Total Cost:** \`${costAt1QU.toLocaleString()}\` QUBIC (~₹${costInINR.toFixed(2)} / $${costInUSD.toFixed(4)})\n\n📱 **Step-by-Step Instructions:**\n\n**1. Open QubicTrade on Your Phone**\n   → Go to **https://qubictrade.io/**\n   → (Must use same phone with Qubic Wallet installed)\n\n**2. Connect Your Wallet**\n   → Tap "Connect Wallet"\n   → Select "Qubic Wallet" app\n   → Approve connection\n\n**3. Select GARTH Asset**\n   → Find and tap on **GARTH**\n\n**4. Place Buy Order**\n   → Tap **BUY**\n   → **Price:** \`1\` QU (type exactly: 1)\n   → **Amount:** \`${signalCode}\` shares\n   → **Total Cost:** ${costAt1QU.toLocaleString()} QUBIC\n\n**5. Confirm Transaction**\n   → Review details\n   → Tap "Confirm"\n   → Approve in Qubic Wallet\n\n⏰ **Expires:** <t:${expiryUnix}:R>\n\n✅ **Why Price = 1 QU?**\nThis keeps your cost ultra-minimal (₹${costInINR.toFixed(2)})! Even if the order executes, you only lose a few rupees.\n\n💡 **After Verification:**\nYour Discord roles will update instantly! You can cancel the order on QubicTrade to get your QUBIC back (optional).`
             });
+
+            console.info(`[${commandId}] Challenge sent - Code: ${signalCode}, Cost: ${costAt1QU} QUBIC`);
 
         } catch (error) {
             if (error.code !== 10062) {
-                console.error('❌ Link Cmd Error:', error);
-                await interaction.editReply({ content: '🔥 System Error.' }).catch(() => {});
+                console.error(`[${commandId}] Link command error: ${error.message}`);
+                await interaction.editReply({ content: '🔥 System Error. Please try again.' }).catch(() => {});
             }
         }
     }
 });
 
-// ==========================================
-// 4. STARTUP
-// ==========================================
-app.listen(PORT, () => console.log(`🌍 Webhook Server running on port ${PORT}`));
-client.login(process.env.DISCORD_TOKEN);
+/**
+ * Application startup
+ */
+app.listen(PORT, () => {
+    console.info('=== QubicLink Server Started ===');
+    console.info(`Webhook server listening on port ${PORT}`);
+    console.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error('Discord login failed:', err.message);
+    process.exit(1);
+});

@@ -75,6 +75,16 @@ const easyConnectSchema = z.object({
 }).strict();
 
 /**
+ * Validates Qubic wallet address format
+ * Must be exactly 60 uppercase letters (A-Z)
+ */
+function isValidQubicAddress(address) {
+    if (!address || typeof address !== 'string') return false;
+    if (address.length !== 60) return false;
+    return /^[A-Z]+$/.test(address);
+}
+
+/**
  * Cryptographically secure random integer generator
  * Uses crypto.randomBytes for unbiased distribution
  */
@@ -525,6 +535,12 @@ client.on(Events.InteractionCreate, async interaction => {
             const walletInput = interaction.options.getString('wallet').trim().toUpperCase();
             const discordId = interaction.user.id;
 
+            // Validate wallet address format
+            if (!isValidQubicAddress(walletInput)) {
+                console.warn(`[${commandId}] Invalid wallet address format: ${walletInput.substring(0,12)}...`);
+                return interaction.editReply('❌ Invalid wallet address. Must be exactly 60 uppercase letters (A-Z).\n\nExample: `JAKDBYHQOUICADHMNZMCMQIUVLZCTCCGEYNLBBGPBFNNTVZZCBCIMWICCFHN`');
+            }
+
             console.debug(`[${commandId}] Wallet: ${walletInput.substring(0,12)}...`);
 
             await prisma.user.upsert({ 
@@ -585,10 +601,9 @@ client.on(Events.InteractionCreate, async interaction => {
             const expiryUnix = Math.floor((Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) / 1000);
             const costAt1QU = signalCode * 1;
             const costInUSD = costAt1QU * CONFIG.QUBIC_TO_USD;
-            const costInINR = costInUSD * CONFIG.USD_TO_INR;
             
             await interaction.editReply({
-                content: `### ${statusMsg}\n**🔐 Verification Code:** \`${signalCode}\` shares\n**💼 Wallet:** \`${walletInput}\`\n**💰 Total Cost:** \`${costAt1QU.toLocaleString()}\` QUBIC (~₹${costInINR.toFixed(2)} / $${costInUSD.toFixed(4)})\n\n📱 **Step-by-Step Instructions:**\n\n**1. Open QubicTrade on Your Phone**\n   → Go to **https://qubictrade.io/**\n   → (Must use same phone with Qubic Wallet installed)\n\n**2. Connect Your Wallet**\n   → Tap "Connect Wallet"\n   → Select "Qubic Wallet" app\n   → Approve connection\n\n**3. Select GARTH Asset**\n   → Find and tap on **GARTH**\n\n**4. Place Buy Order**\n   → Tap **BUY**\n   → **Price:** \`1\` QU (type exactly: 1)\n   → **Amount:** \`${signalCode}\` shares\n   → **Total Cost:** ${costAt1QU.toLocaleString()} QUBIC\n\n**5. Confirm Transaction**\n   → Review details\n   → Tap "Confirm"\n   → Approve in Qubic Wallet\n\n⏰ **Expires:** <t:${expiryUnix}:R>\n\n✅ **Why Price = 1 QU?**\nThis keeps your cost ultra-minimal (₹${costInINR.toFixed(2)})! Even if the order executes, you only lose a few rupees.\n\n💡 **After Verification:**\nYour Discord roles will update instantly! You can cancel the order on QubicTrade to get your QUBIC back (optional).`
+                content: `### ${statusMsg}\n**Verification Code:** \`${signalCode}\` shares\n**Wallet:** \`${walletInput}\`\n**Cost:** ${costAt1QU.toLocaleString()} QUBIC (${costInUSD.toFixed(4)})\n\n**Instructions:**\n\n1. Open https://qubictrade.com/ on your phone (with Qubic Wallet installed)\n2. Connect your wallet\n3. Select **GARTH** asset\n4. Click **BUY**\n5. Set **Price:** \`1\` QU\n6. Set **Amount:** \`${signalCode}\` shares\n7. Confirm transaction\n\n**Expires:** <t:${expiryUnix}:R>\n\nAfter verification, you may cancel the order on QubicTrade to recover your QUBIC.`
             });
 
             console.info(`[${commandId}] Challenge sent - Code: ${signalCode}, Cost: ${costAt1QU} QUBIC`);

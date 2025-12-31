@@ -31,9 +31,7 @@ module.exports = {
                 const listPromises = wallets.map(async (w, i) => {
                     const bal = w.isVerified ? await getQubicBalance(w.address) : 0n;
                     if (w.isVerified) totalBalance += bal;
-                    return `${i+1}. 
-${w.address.substring(0, 8)}...
- - ${w.isVerified ? '✅' : '⏳'} ${w.isVerified ? `(${bal.toString()} Q)` : ''}`;
+                    return `${i + 1}. ${w.address.slice(0, 8)}... ${w.isVerified ? `✅ (${bal.toString()} Q)` : '⏳ Pending verification'}`;
                 });
                 
                 const list = (await Promise.all(listPromises)).join('\n');
@@ -108,7 +106,7 @@ ${totalBalance.toString()} QUBIC`
                 let statusMsg = "🔐 Secure Link Initiated";
                 const activeChallenge = await prisma.challenge.findFirst({
                     where: { 
-                        discordId,
+                        discordId, 
                         walletAddress: walletInput, 
                         expiresAt: { gt: new Date() } 
                     },
@@ -129,7 +127,7 @@ ${totalBalance.toString()} QUBIC`
                     
                     await prisma.challenge.create({
                         data: { 
-                            discordId,
+                            discordId, 
                             walletAddress: walletInput, 
                             signalCode, 
                             expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) 
@@ -141,11 +139,7 @@ ${totalBalance.toString()} QUBIC`
                 const expiryUnix = Math.floor((Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) / 1000);
                 
                 await interaction.editReply({
-                    content: `### ${statusMsg}\n\nTo verify ownership of your wallet, please complete a **temporary buy order**.\n\n---\n\n#### 1️⃣ Create a Buy Order\n- **Asset:** 
-- **Price:** 
-- **Shares:** 
-\nUse https://qubictrade.com/ or https://qxboard.com/ to place the order.\n\n---\n\n#### 2️⃣ Confirmation & Cancellation\n- Once the transaction is confirmed, you may **cancel the order immediately** to recover your funds.  \n- Verification typically completes within **6–7 minutes**.\n\n⏳ **Time limit:** Please complete this within **5 minutes**  \n⏰ This request expires **<t:${expiryUnix}:R>**\n\n---\n\n**Wallet:** 
-**Verification Code:** `
+                    content: `### ${statusMsg}\n\nTo verify ownership of your wallet, please complete a **temporary buy order**.\n\n---\n\n#### 1️⃣ Create a Buy Order\n- **Asset:** \n- **Price:** \n- **Shares:** \n\nUse https://qubictrade.com/ or https://qxboard.com/ to place the order.\n\n---\n\n#### 2️⃣ Confirmation & Cancellation\n- Once the transaction is confirmed, you may **cancel the order immediately** to recover your funds.  \n- Verification typically completes within **6–7 minutes**.\n\n⏳ **Time limit:** Please complete this within **5 minutes**  \n⏰ This request expires **<t:${expiryUnix}:R>**\n\n---\n\n**Wallet:** \n**Verification Code:** `
                 });
 
                 console.info(`[${commandId}] Challenge sent - Code: ${signalCode}`);

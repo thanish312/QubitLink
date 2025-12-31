@@ -4,6 +4,7 @@ const path = require('path');
 const client = require('./bot/client');
 const createServer = require('./web/server');
 const portfolioRefreshJob = require('./jobs/portfolioRefresh');
+const cleanupWalletsJob = require('./jobs/cleanupWallets');
 const CONFIG = require('./config/config');
 
 // Register Discord event handlers
@@ -20,8 +21,9 @@ for (const file of eventFiles) {
     }
 }
 
-// Start the cron job
+// Start the cron jobs
 portfolioRefreshJob(client);
+cleanupWalletsJob();
 
 // Create and start the web server
 const { start } = createServer(client);

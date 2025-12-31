@@ -77,41 +77,59 @@ ${totalBalance.toString()} QUBIC`
                     where: { address: walletInput } 
                 });
                 
-                if (existingWallet && existingWallet.userId !== discordId && existingWallet.isVerified) {
-                    console.warn(`[${commandId}] Wallet already verified by another user`);
-                    return interaction.editReply('🚫 Access Denied. Wallet verified by another user.');
+                if (existingWallet && existingWallet.userId === discordId && existingWallet.isVerified) {
+                    console.debug(`[${commandId}] Wallet already linked and verified for this user`);
+                    return interaction.editReply('✅ Already Linked. This wallet is in your portfolio and verified.');
                 }
                 
-                if (existingWallet && existingWallet.userId === discordId && existingWallet.isVerified) {
-                    console.debug(`[${commandId}] Wallet already linked to this user`);
-                    return interaction.editReply('✅ Already Linked. This wallet is in your portfolio.');
+                if (existingWallet && existingWallet.userId !== discordId && existingWallet.isVerified) {
+                    console.warn(`[${commandId}] Wallet already verified by another user`);
+                    return interaction.editReply('🚫 Access Denied. This wallet is already verified by another user.');
                 }
 
-                await prisma.wallet.upsert({
-                    where: { address: walletInput },
-                    update: { userId: discordId },
-                    create: { address: walletInput, userId: discordId }
-                });
+                // Explicitly create or update to prevent duplicates
+                if (!existingWallet) {
+                    await prisma.wallet.create({
+                        data: {
+                            address: walletInput,
+                            userId: discordId,
+                        }
+                    });
+                } else if (existingWallet.userId !== discordId) {
+                    // Allow a user to "claim" an unverified wallet entry
+                    await prisma.wallet.update({
+                        where: { address: walletInput },
+                        data: { userId: discordId }
+                    });
+                }
+
 
                 let signalCode;
-                const active = await prisma.challenge.findFirst({
+                let statusMsg = "🔐 Secure Link Initiated";
+                const activeChallenge = await prisma.challenge.findFirst({
                     where: { 
-                        discordId, 
+                        discordId,
                         walletAddress: walletInput, 
                         expiresAt: { gt: new Date() } 
                     },
                     orderBy: { createdAt: 'desc' }
                 });
 
-                if (active) {
-                    signalCode = active.signalCode;
-                    console.info(`[${commandId}] Reusing existing challenge: ${signalCode}`);
+                if (activeChallenge) {
+                    signalCode = activeChallenge.signalCode;
+                    statusMsg = "🔄 Active Challenge Found";
+                    // Reset the timer by updating the expiresAt field
+                    await prisma.challenge.update({
+                        where: { id: activeChallenge.id },
+                        data: { expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) }
+                    });
+                    console.info(`[${commandId}] Reusing and resetting timer for existing challenge: ${signalCode}`);
                 } else {
                     signalCode = secureRandomInt(CONFIG.SIGNAL_CODE_MIN, CONFIG.SIGNAL_CODE_MAX);
                     
                     await prisma.challenge.create({
                         data: { 
-                            discordId, 
+                            discordId,
                             walletAddress: walletInput, 
                             signalCode, 
                             expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) 
@@ -123,30 +141,12 @@ ${totalBalance.toString()} QUBIC`
                 const expiryUnix = Math.floor((Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) / 1000);
                 
                 await interaction.editReply({
-  content: 
-`🔐 **Wallet Verification Required**
-
-To verify ownership of your wallet, complete a **temporary buy order**.
-
-**1️⃣ Create a Buy Order**
-• **Asset:** \`GARTH\`  
-• **Price:** \`1 QU\`  
-• **Shares:** \`${signalCode}\`
-
-Create the order using:
-<https://qubictrade.com/> or <https://qxboard.com/>
-
-**2️⃣ Confirmation & Cancellation**
-• Once confirmed, you may **cancel the order immediately** to recover your funds  
-• Verification completes in **~6–7 minutes**
-
-⏳ **Time limit:** 5 minutes  
-⏰ **Expires:** <t:${expiryUnix}:R>
-
-**Wallet:** \`${walletInput}\`  
-**Verification Code:** \`${signalCode}\``
-});
-
+                    content: `### ${statusMsg}\n\nTo verify ownership of your wallet, please complete a **temporary buy order**.\n\n---\n\n#### 1️⃣ Create a Buy Order\n- **Asset:** 
+- **Price:** 
+- **Shares:** 
+\nUse https://qubictrade.com/ or https://qxboard.com/ to place the order.\n\n---\n\n#### 2️⃣ Confirmation & Cancellation\n- Once the transaction is confirmed, you may **cancel the order immediately** to recover your funds.  \n- Verification typically completes within **6–7 minutes**.\n\n⏳ **Time limit:** Please complete this within **5 minutes**  \n⏰ This request expires **<t:${expiryUnix}:R>**\n\n---\n\n**Wallet:** 
+**Verification Code:** `
+                });
 
                 console.info(`[${commandId}] Challenge sent - Code: ${signalCode}`);
 

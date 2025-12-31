@@ -21,6 +21,7 @@ model Wallet {
   address       String   @id @unique // A wallet can only belong to ONE user (Security)
   isVerified    Boolean  @default(false)
   verifiedAt    DateTime?
+  createdAt     DateTime @default(now())
   
   // Link back to the human
   userId        String

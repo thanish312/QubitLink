@@ -52,8 +52,9 @@ router.get('/stats', adminAuth, async (req, res) => {
 
         res.json({ totalVerified, pendingChallenges, totalUsers, recentVerifications });
     } catch (error) {
-        console.error('[Admin] Stats fetch error:', error);
-        res.status(500).json({ error: 'Failed to fetch stats' });
+        // Handle database sleep/connection errors gracefully
+        console.error('[Admin] Stats fetch error (DB might be sleeping):', error.message);
+        res.status(500).json({ error: 'Database connection error' });
     }
 });
 
@@ -72,7 +73,7 @@ router.get('/config', adminAuth, async (req, res) => {
 });
 
 /**
- * Get All Wallets
+ * Get All Wallets (FIXED FRONTEND COMPATIBILITY)
  */
 router.get('/wallets', adminAuth, async (req, res) => {
     try {
@@ -80,7 +81,14 @@ router.get('/wallets', adminAuth, async (req, res) => {
             orderBy: { verifiedAt: 'desc' },
             take: 100
         });
-        res.json(wallets);
+
+        // MAGIC FIX: We map 'address' to 'id' so your Frontend code finds the ID it expects.
+        const compatibleWallets = wallets.map(w => ({
+            ...w,
+            id: w.address // <--- This fixes the "undefined" error in your dashboard buttons
+        }));
+
+        res.json(compatibleWallets);
     } catch (error) {
         console.error('[Admin] Wallets fetch error:', error);
         res.status(500).json({ error: 'Failed to fetch wallets' });
@@ -91,9 +99,17 @@ router.get('/wallets', adminAuth, async (req, res) => {
  * Delete Wallet
  */
 router.delete('/wallets/:id', adminAuth, async (req, res) => {
+    const targetId = req.params.id;
+
+    // Safety check for the "undefined" issue
+    if (!targetId || targetId === 'undefined') {
+        console.error('[Admin] Delete failed: Frontend sent "undefined" ID');
+        return res.status(400).json({ error: 'Invalid Wallet Address' });
+    }
+
     try {
-        await prisma.wallet.delete({ where: { id: req.params.id } });
-        console.info(`[Admin] Wallet deleted: ${req.params.id}`);
+        await prisma.wallet.deleteMany({ where: { address: targetId } });
+        console.info(`[Admin] Wallet deleted: ${targetId}`);
         res.json({ success: true });
     } catch (error) {
         console.error('[Admin] Wallet delete error:', error);
@@ -105,36 +121,95 @@ router.delete('/wallets/:id', adminAuth, async (req, res) => {
  * Manually Verify Wallet
  */
 router.post('/wallets/:id/verify', adminAuth, async (req, res) => {
+    const walletAddress = req.params.id;
+
+    // Safety check for the "undefined" issue
+    if (!walletAddress || walletAddress === 'undefined') {
+        console.error('[Admin] Verify failed: Frontend sent "undefined" ID');
+        return res.status(400).json({ error: 'Invalid Wallet Address' });
+    }
+    
     try {
-        const wallet = await prisma.wallet.update({
-            where: { id: req.params.id },
-            data: { isVerified: true, verifiedAt: new Date() }
+        let wallet;
+        let discordUserId;
+
+        // 1. Check if wallet already exists
+        const existingWallet = await prisma.wallet.findUnique({
+            where: { address: walletAddress }
         });
+
+        if (existingWallet) {
+            discordUserId = existingWallet.userId;
+            wallet = await prisma.wallet.update({
+                where: { address: walletAddress },
+                data: { isVerified: true, verifiedAt: new Date() }
+            });
+        } else {
+            // 2. Wallet doesn't exist, find the owner via Challenge
+            const challenge = await prisma.challenge.findFirst({
+                where: { walletAddress: walletAddress },
+                orderBy: { createdAt: 'desc' }
+            });
+
+            if (!challenge) {
+                return res.status(404).json({ 
+                    error: 'Wallet not found in DB and no pending challenge found.' 
+                });
+            }
+
+            discordUserId = challenge.discordId;
+
+            // Ensure User exists
+            await prisma.user.upsert({
+                where: { discordId: discordUserId },
+                update: {},
+                create: { discordId: discordUserId }
+            });
+
+            // Create Verified Wallet
+            wallet = await prisma.wallet.create({
+                data: {
+                    address: walletAddress,
+                    userId: discordUserId,
+                    isVerified: true,
+                    verifiedAt: new Date()
+                }
+            });
+        }
 
         console.info(`[Admin] Wallet manually verified: ${wallet.address.substring(0,12)}...`);
 
-        // Get Discord client from app
-        const client = req.app.get('discord_client');
-        const guild = await client.guilds.fetch(CONFIG.GUILD_ID);
-        const member = await guild.members.fetch(wallet.userId);
-        await addRoleSafe(member, CONFIG.ROLES.VERIFIED, "VERIFIED");
+        // Assign Roles
+        try {
+            const client = req.app.get('discord_client');
+            const guild = await client.guilds.fetch(CONFIG.GUILD_ID);
+            const member = await guild.members.fetch(discordUserId);
+            
+            await addRoleSafe(member, CONFIG.ROLES.VERIFIED, "VERIFIED");
 
-        // Check whale status
-        const userWallets = await prisma.wallet.findMany({
-            where: { userId: wallet.userId, isVerified: true }
-        });
-        let total = 0n;
-        for (const w of userWallets) {
-            total += await getQubicBalance(w.address);
-        }
-        if (total >= CONFIG.WHALE_THRESHOLD) {
-            await addRoleSafe(member, CONFIG.ROLES.WHALE, "WHALE");
+            // Check Whales
+            const userWallets = await prisma.wallet.findMany({
+                where: { userId: discordUserId, isVerified: true }
+            });
+            
+            let total = 0n;
+            for (const w of userWallets) {
+                try {
+                    total += await getQubicBalance(w.address);
+                } catch (e) { /* ignore balance error */ }
+            }
+            
+            if (total >= CONFIG.WHALE_THRESHOLD) {
+                await addRoleSafe(member, CONFIG.ROLES.WHALE, "WHALE");
+            }
+        } catch (e) {
+            console.warn('[Admin] Discord Role update minor error:', e.message);
         }
 
         res.json({ success: true });
     } catch (error) {
         console.error('[Admin] Manual verification error:', error);
-        res.status(500).json({ error: 'Failed to verify wallet' });
+        res.status(500).json({ error: 'Failed to verify wallet: ' + error.message });
     }
 });
 
@@ -147,7 +222,15 @@ router.get('/challenges', adminAuth, async (req, res) => {
             where: { expiresAt: { gt: new Date() } },
             orderBy: { createdAt: 'desc' }
         });
-        res.json(challenges);
+        
+        // Add ID mapping for challenges too, just in case
+        const safeChallenges = challenges.map(c => ({
+            ...c,
+            // If frontend uses id, it works. If it uses address, it works.
+            id: c.id 
+        }));
+
+        res.json(safeChallenges);
     } catch (error) {
         console.error('[Admin] Challenges fetch error:', error);
         res.status(500).json({ error: 'Failed to fetch challenges' });

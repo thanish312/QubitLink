@@ -36,7 +36,7 @@ async function getQubicBalance(address) {
  * Verifies a transaction's authenticity via on-chain RPC.
  * @param {string} txId - The transaction ID to verify.
  * @param {string} expectedSource - The expected source address of the transaction.
- * @param {number} expectedAmount - The expected amount of the transaction.
+ * @param {number|string} expectedAmount - The expected amount of the transaction.
  * @returns {Promise<boolean>} - True if the transaction is valid, false otherwise.
  */
 async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
@@ -57,13 +57,15 @@ async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
             return false;
         }
 
-        const sourceMatch = onChainTx.sourceId === expectedSource;
-        const amountMatch = onChainTx.amount === expectedAmount;
+        // FIXED: Convert both sides to String to prevent Type Mismatches (Number vs String)
+        const sourceMatch = String(onChainTx.sourceId).trim() === String(expectedSource).trim();
+        const amountMatch = String(onChainTx.amount) === String(expectedAmount);
 
         if (!sourceMatch || !amountMatch) {
             console.warn(`[QubicService] Semantic mismatch detected for txId: ${txId.substring(0,12)}...`);
-            console.warn(`  Expected: source=${expectedSource.substring(0,12)}..., amount=${expectedAmount}`);
-            console.warn(`  On-chain: source=${onChainTx.sourceId.substring(0,12)}..., amount=${onChainTx.amount}`);
+            // Logs now show types clearly to help debugging in future
+            console.warn(`  Expected: source=${expectedSource.substring(0,12)}... (Type: ${typeof expectedSource}), amount=${expectedAmount} (Type: ${typeof expectedAmount})`);
+            console.warn(`  On-chain: source=${onChainTx.sourceId.substring(0,12)}... (Type: ${typeof onChainTx.sourceId}), amount=${onChainTx.amount} (Type: ${typeof onChainTx.amount})`);
             return false;
         }
 

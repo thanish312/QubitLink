@@ -13,6 +13,14 @@ module.exports = {
         const rest = new REST({ version: '10' }).setToken(CONFIG.DISCORD_TOKEN);
         
         try {
+            // First, clear all existing commands to prevent duplicates
+            await rest.put(
+                Routes.applicationGuildCommands(CONFIG.CLIENT_ID, CONFIG.GUILD_ID), 
+                { body: [] }
+            );
+            console.info('Cleared existing commands');
+            
+            // Then register the new commands
             await rest.put(
                 Routes.applicationGuildCommands(CONFIG.CLIENT_ID, CONFIG.GUILD_ID), 
                 { body: commands }

@@ -1,4 +1,25 @@
-const { verifyAdminToken } = require('../utils/crypto');
+const crypto = require('crypto');
+
+/**
+ * Generate admin authentication token
+ */
+function generateAdminToken() {
+    const payload = { role: 'admin', timestamp: Date.now() };
+    return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+/**
+ * Verify admin authentication token
+ */
+function verifyAdminToken(token) {
+    try {
+        const payload = JSON.parse(Buffer.from(token, 'base64').toString());
+        // Token valid for 24 hours
+        return payload.role === 'admin' && (Date.now() - payload.timestamp) < 86400000;
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Admin authentication middleware
@@ -29,6 +50,8 @@ function adminCors(req, res, next) {
 }
 
 module.exports = {
+    generateAdminToken,
+    verifyAdminToken,
     adminAuth,
     adminCors
 };

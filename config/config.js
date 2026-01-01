@@ -16,7 +16,11 @@ const CONFIG = {
     RATE_LIMIT_DELAY_MS: 200,
     GUILD_ID: process.env.GUILD_ID,
     CLIENT_ID: process.env.CLIENT_ID,
-    DISCORD_TOKEN: process.env.DISCORD_TOKEN
+    DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+    CLEANUP_JOB_SCHEDULE: '0 * * * *', // Every hour
+    PORTFOLIO_REFRESH_JOB_SCHEDULE: '*/30 * * * *', // Every 30 minutes
+    PORTFOLIO_REFRESH_BATCH_SIZE: 20,
+    PORTFOLIO_REFRESH_BATCH_DELAY_MS: 1000
 };
 
 module.exports = CONFIG;

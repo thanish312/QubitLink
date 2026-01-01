@@ -1,14 +1,17 @@
 const { z } = require('zod');
 
-// Webhook Payload Schema
+/**
+ * Zod schema for the EasyConnect webhook payload.
+ * This schema validates the structure and types of the incoming data.
+ */
 const easyConnectSchema = z.object({
     ProcedureTypeName: z.string(),
     ProcedureTypeValue: z.number().int(),
     RawTransaction: z.object({
         transaction: z.object({
-            sourceId: z.string().regex(/^[A-Z2-7]{52,60}$/),
-            destId: z.string().regex(/^[A-Z2-7]{52,60}$/),
-            amount: z.string().regex(/^\d+$/),
+            sourceId: z.string().regex(/^[A-Z]{60}$/, "Invalid Qubic address format"),
+            destId: z.string().regex(/^[A-Z]{60}$/, "Invalid Qubic address format"),
+            amount: z.string().regex(/^\d+$/).transform(BigInt),
             tickNumber: z.number().int().positive(),
             inputType: z.number().int(),
             inputSize: z.number().int(),

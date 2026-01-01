@@ -1,45 +1,49 @@
 const cron = require('node-cron');
 const prisma = require('../services/prisma');
-const { Prisma } = require('@prisma/client');
+const CONFIG = require('../config/config');
 
-const CLEANUP_INTERVAL_MINUTES = 15;
+// This interval is used to prevent the cleanup job from deleting a wallet
+// while a user still has a valid challenge pending. The default is 24 hours.
+const CLEANUP_INTERVAL_HOURS = 24;
 
-/**
- * Scheduled job to clean up old, unverified wallets from the database.
- */
-const cleanupWalletsJob = () => cron.schedule('*/5 * * * *', async () => { // Runs every 5 minutes
-    console.info('=== Unverified Wallet Cleanup Started ===');
-    const startTime = Date.now();
-
+const cleanupWalletsJob = () => {
     try {
-        const cutoffDate = new Date(Date.now() - CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+        cron.schedule(CONFIG.CLEANUP_JOB_SCHEDULE, async () => {
+            console.info('=== 🧹 Database Cleanup Started ===');
+            
+            try {
+                const cutoffDate = new Date(Date.now() - CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
+                
+                // 1. Clean up Expired Challenges
+                // These are safe to delete immediately after they expire.
+                const deletedChallenges = await prisma.challenge.deleteMany({
+                    where: { expiresAt: { lt: new Date() } }
+                });
+                if (deletedChallenges.count > 0) {
+                    console.info(`   - Removed ${deletedChallenges.count} expired challenges`);
+                }
 
-        const deletedWallets = await prisma.wallet.deleteMany({
-            where: {
-                isVerified: false,
-                createdAt: {
-                    lt: cutoffDate,
-                },
-            },
+                // 2. Clean up Old Unverified Wallets
+                // We only delete them if they are older than the cleanup interval
+                // to avoid interfering with active verifications.
+                const deletedWallets = await prisma.wallet.deleteMany({
+                    where: {
+                        isVerified: false,
+                        createdAt: { lt: cutoffDate },
+                    },
+                });
+                
+                if (deletedWallets.count > 0) {
+                    console.info(`   - Removed ${deletedWallets.count} stale wallets (>${CLEANUP_INTERVAL_HOURS}h old)`);
+                }
+                
+            } catch (e) { 
+                console.error('Cleanup job error:', e.message); 
+            }
         });
-
-        if (deletedWallets.count > 0) {
-            console.info(`Cleaned up ${deletedWallets.count} unverified wallet(s).`);
-        } else {
-            console.info('No unverified wallets to clean up.');
-        }
-
-    } catch (error) {
-        // P2025 is the error code for "record to delete not found", which is fine.
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-            console.info('No unverified wallets to clean up.');
-        } else {
-            console.error(`Unverified wallet cleanup critical failure: ${error.message}`);
-        }
+    } catch (e) {
+        console.error('Failed to start cleanup job:', e.message);
     }
-
-    const duration = Date.now() - startTime;
-    console.info(`=== Unverified Wallet Cleanup Complete - Duration: ${duration}ms ===`);
-});
+};
 
 module.exports = cleanupWalletsJob;

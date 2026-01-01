@@ -1,29 +1,21 @@
 const crypto = require('crypto');
 
 /**
- * Cryptographically secure random integer generator
- * Uses crypto.randomBytes for unbiased distribution
+ * Generates a cryptographically secure random integer within a given range.
+ * This is important for generating challenge codes that are not predictable.
+ * @param {number} min - The minimum value of the range (inclusive).
+ * @param {number} max - The maximum value of the range (inclusive).
+ * @returns {number} - A secure random integer.
  */
 function secureRandomInt(min, max) {
-    const range = max - min + 1;
-    const bytesNeeded = Math.ceil(Math.log2(range) / 8);
-    const maxValue = Math.pow(256, bytesNeeded);
-    const threshold = maxValue - (maxValue % range);
-    
-    let randomValue;
-    do {
-        const randomBytes = crypto.randomBytes(bytesNeeded);
-        randomValue = 0;
-        for (let i = 0; i < bytesNeeded; i++) {
-            randomValue = (randomValue << 8) | randomBytes[i];
-        }
-    } while (randomValue >= threshold);
-    
-    return min + (randomValue % range);
+    return crypto.randomInt(min, max + 1);
 }
 
 /**
- * Rate limiting utility
+ * A simple promise-based sleep function.
+ * This is used for rate limiting to avoid overwhelming external APIs.
+ * @param {number} ms - The number of milliseconds to sleep.
+ * @returns {Promise<void>} - A promise that resolves after the specified time.
  */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 

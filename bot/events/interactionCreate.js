@@ -1,9 +1,11 @@
 const { Events } = require('discord.js');
-const prisma = require('../../services/prisma');
-const { safeDeferReply } = require('../../services/discord.service');
-const { getQubicBalance, isValidQubicAddress } = require('../../services/qubic.service');
-const { secureRandomInt } = require('../../utils/helpers');
-const CONFIG = require('../../config/config');
+const portfolio = require('../interactions/portfolio');
+const link = require('../interactions/link');
+
+const commands = {
+    portfolio,
+    link,
+};
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -11,145 +13,10 @@ module.exports = {
         if (!interaction.isChatInputCommand()) return;
 
         const commandId = `${interaction.user.id}-${Date.now()}`;
+        const command = commands[interaction.commandName];
 
-        if (interaction.commandName === 'portfolio') {
-            console.info(`[${commandId}] Portfolio command - User: ${interaction.user.tag}`);
-            
-            try {
-                await safeDeferReply(interaction);
-                
-                const wallets = await prisma.wallet.findMany({ 
-                    where: { userId: interaction.user.id } 
-                });
-
-                if (wallets.length === 0) {
-                    console.debug(`[${commandId}] No wallets found`);
-                    return interaction.editReply('You have no linked wallets. Use `/link` to add one.');
-                }
-
-                let totalBalance = 0n;
-                const listPromises = wallets.map(async (w, i) => {
-                    const bal = w.isVerified ? await getQubicBalance(w.address) : 0n;
-                    if (w.isVerified) totalBalance += bal;
-                    return `${i + 1}. ${w.address.slice(0, 8)}... ${w.isVerified ? `✅ (${bal.toString()} Q)` : '⏳ Pending verification'}`;
-                });
-                
-                const list = (await Promise.all(listPromises)).join('\n');
-
-                await interaction.editReply({
-                    content: `### 💼 Your Portfolio\n\n${list}\n\n**Total Net Worth:** 
-${totalBalance.toString()} QUBIC`
-                });
-                
-                console.info(`[${commandId}] Portfolio displayed - Wallets: ${wallets.length}, Total: ${totalBalance.toString()}`);
-            } catch (e) { 
-                if (e.code !== 10062) {
-                    console.error(`[${commandId}] Portfolio command error: ${e.message}`);
-                }
-            }
-        }
-
-        if (interaction.commandName === 'link') {
-            console.info(`[${commandId}] Link command - User: ${interaction.user.tag}`);
-            
-            try {
-                await safeDeferReply(interaction);
-
-                const walletInput = interaction.options.getString('wallet').trim().toUpperCase();
-                const discordId = interaction.user.id;
-
-                if (!isValidQubicAddress(walletInput)) {
-                    console.warn(`[${commandId}] Invalid wallet address format: ${walletInput.substring(0,12)}...`);
-                    return interaction.editReply('❌ Invalid wallet address. Must be exactly 60 uppercase letters (A-Z).\n\nExample: `JAKDBYHQOUICADHMNZMCMQIUVLZCTCCGEYNLBBGPBFNNTVZZCBCIMWICCFHN`');
-                }
-
-                console.debug(`[${commandId}] Wallet: ${walletInput.substring(0,12)}...`);
-
-                await prisma.user.upsert({ 
-                    where: { discordId }, 
-                    update: {}, 
-                    create: { discordId } 
-                });
-
-                const existingWallet = await prisma.wallet.findUnique({ 
-                    where: { address: walletInput } 
-                });
-                
-                if (existingWallet && existingWallet.userId === discordId && existingWallet.isVerified) {
-                    console.debug(`[${commandId}] Wallet already linked and verified for this user`);
-                    return interaction.editReply('✅ Already Linked. This wallet is in your portfolio and verified.');
-                }
-                
-                if (existingWallet && existingWallet.userId !== discordId && existingWallet.isVerified) {
-                    console.warn(`[${commandId}] Wallet already verified by another user`);
-                    return interaction.editReply('🚫 Access Denied. This wallet is already verified by another user.');
-                }
-
-                // Explicitly create or update to prevent duplicates
-                if (!existingWallet) {
-                    await prisma.wallet.create({
-                        data: {
-                            address: walletInput,
-                            userId: discordId,
-                        }
-                    });
-                } else if (existingWallet.userId !== discordId) {
-                    // Allow a user to "claim" an unverified wallet entry
-                    await prisma.wallet.update({
-                        where: { address: walletInput },
-                        data: { userId: discordId }
-                    });
-                }
-
-
-                let signalCode;
-                let statusMsg = "🔐 Secure Link Initiated";
-                const activeChallenge = await prisma.challenge.findFirst({
-                    where: { 
-                        discordId, 
-                        walletAddress: walletInput, 
-                        expiresAt: { gt: new Date() } 
-                    },
-                    orderBy: { createdAt: 'desc' }
-                });
-
-                if (activeChallenge) {
-                    signalCode = activeChallenge.signalCode;
-                    statusMsg = "🔄 Active Challenge Found";
-                    // Reset the timer by updating the expiresAt field
-                    await prisma.challenge.update({
-                        where: { id: activeChallenge.id },
-                        data: { expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) }
-                    });
-                    console.info(`[${commandId}] Reusing and resetting timer for existing challenge: ${signalCode}`);
-                } else {
-                    signalCode = secureRandomInt(CONFIG.SIGNAL_CODE_MIN, CONFIG.SIGNAL_CODE_MAX);
-                    
-                    await prisma.challenge.create({
-                        data: { 
-                            discordId, 
-                            walletAddress: walletInput, 
-                            signalCode, 
-                            expiresAt: new Date(Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) 
-                        }
-                    });
-                    console.info(`[${commandId}] New challenge created: ${signalCode} shares`);
-                }
-
-                const expiryUnix = Math.floor((Date.now() + CONFIG.CHALLENGE_EXPIRY_MS) / 1000);
-                
-                await interaction.editReply({
-                    content: `### ${statusMsg}\n\nTo verify ownership of your wallet, please complete a **temporary buy order**.\n\n---\n\n#### 1️⃣ Create a Buy Order\n- **Asset:** \n- **Price:** \n- **Shares:** \n\nUse https://qubictrade.com/ or https://qxboard.com/ to place the order.\n\n---\n\n#### 2️⃣ Confirmation & Cancellation\n- Once the transaction is confirmed, you may **cancel the order immediately** to recover your funds.  \n- Verification typically completes within **6–7 minutes**.\n\n⏳ **Time limit:** Please complete this within **5 minutes**  \n⏰ This request expires **<t:${expiryUnix}:R>**\n\n---\n\n**Wallet:** \n**Verification Code:** `
-                });
-
-                console.info(`[${commandId}] Challenge sent - Code: ${signalCode}`);
-
-            } catch (error) {
-                if (error.code !== 10062) {
-                    console.error(`[${commandId}] Link command error: ${error.message}`);
-                    await interaction.editReply({ content: '🔥 System Error. Please try again.' }).catch(() => {});
-                }
-            }
+        if (command) {
+            await command(interaction, commandId);
         }
     },
 };

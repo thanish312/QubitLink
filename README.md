@@ -204,17 +204,20 @@ PORT               # Set to 3000
 **Build command**
 
 ```bash
-npm install
-npm install express
-npx prisma generate
-npx prisma db push
+npm install && cd frontend && npm install && npm run build && cd ..
 ```
+
+This installs backend dependencies, installs frontend dependencies, builds the React frontend, and returns to the root directory.
 
 **Start command**
 
 ```bash
-node index.js
+npx prisma generate && npx prisma db push && node index.js
 ```
+
+This generates the Prisma client, pushes the database schema, and starts the server.
+
+**Note:** The frontend must be built before deployment. The build command ensures the `frontend/dist/` directory exists for the Express server to serve static files.
 
 ### 6. Webhook public URL
 

@@ -10,7 +10,6 @@ datasource db {
 // The Human (Discord Account)
 model User {
   discordId     String   @id @unique
-  createdAt     DateTime @default(now())
   
   // A user can own multiple wallets
   wallets       Wallet[]
@@ -25,19 +24,21 @@ model Wallet {
   
   // Link back to the human
   userId        String
-  user          User     @relation(fields: [userId], references: [discordId])
+  user          User     @relation(fields: [userId], references: [discordId], onDelete: Cascade)
 }
 
 // Temporary Handshakes
 model Challenge {
-  id            Int      @id @default(autoincrement())
+  id            String   @id @default(cuid())
   discordId     String
   walletAddress String
   signalCode    Int
   expiresAt     DateTime
   createdAt     DateTime @default(now())
-}
 
+  @@index([discordId])
+  @@index([walletAddress])
+}
 
 model ProcessedTransaction {
   txId      String   @id @unique // The Qubic Transaction ID

@@ -1,8 +1,10 @@
 const CONFIG = require('../config/config');
 
 /**
- * Validates Qubic wallet address format
- * Must be exactly 60 uppercase letters (A-Z)
+ * Validates the format of a Qubic wallet address.
+ * A valid address must be exactly 60 uppercase letters (A-Z).
+ * @param {string} address - The Qubic wallet address to validate.
+ * @returns {boolean} - True if the address is valid, false otherwise.
  */
 function isValidQubicAddress(address) {
     if (!address || typeof address !== 'string') return false;
@@ -11,33 +13,39 @@ function isValidQubicAddress(address) {
 }
 
 /**
- * Fetches on-chain balance for a Qubic wallet address
+ * Fetches the on-chain balance for a Qubic wallet address.
+ * @param {string} address - The Qubic wallet address.
+ * @returns {Promise<bigint>} - The balance of the wallet as a BigInt.
+ * @throws {Error} - Throws an error if the RPC request fails.
  */
 async function getQubicBalance(address) {
     try {
         const response = await fetch(`${CONFIG.QUBIC_RPC_URL}/v1/balances/${address}`);
         if (!response.ok) {
-            console.warn(`Balance API returned ${response.status} for ${address.substring(0,8)}...`);
-            return 0n;
+            throw new Error(`RPC Error ${response.status}`);
         }
         const data = await response.json();
         return BigInt(data.balance?.balance || 0);
     } catch (error) {
-        console.error(`Balance fetch failed for ${address.substring(0,8)}...: ${error.message}`);
-        return 0n;
+        // Re-throw the error so the calling function knows to abort
+        throw new Error(`[QubicService] Failed to get balance for ${address.substring(0, 12)}...: ${error.message}`);
     }
 }
 
 /**
- * Layer 2: Verifies transaction authenticity via on-chain RPC
+ * Verifies a transaction's authenticity via on-chain RPC.
+ * @param {string} txId - The transaction ID to verify.
+ * @param {string} expectedSource - The expected source address of the transaction.
+ * @param {number} expectedAmount - The expected amount of the transaction.
+ * @returns {Promise<boolean>} - True if the transaction is valid, false otherwise.
  */
 async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
     try {
-        console.info(`[Layer 2] Verifying transaction: ${txId.substring(0,12)}...`);
+        console.info(`[QubicService] Verifying transaction: ${txId.substring(0,12)}...`);
         
         const response = await fetch(`${CONFIG.QUBIC_RPC_URL}/v1/transactions/${txId}`);
         if (!response.ok) {
-            console.warn(`[Layer 2] RPC returned ${response.status} for ${txId.substring(0,12)}...`);
+            console.warn(`[QubicService] RPC returned ${response.status} for ${txId.substring(0,12)}...`);
             return false;
         }
         
@@ -45,7 +53,7 @@ async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
         const onChainTx = rpcResponse.transaction;
         
         if (!onChainTx) {
-            console.warn(`[Layer 2] No transaction data found on-chain for ${txId.substring(0,12)}...`);
+            console.warn(`[QubicService] No transaction data found on-chain for ${txId.substring(0,12)}...`);
             return false;
         }
 
@@ -53,16 +61,16 @@ async function verifyTransactionOnChain(txId, expectedSource, expectedAmount) {
         const amountMatch = onChainTx.amount === expectedAmount;
 
         if (!sourceMatch || !amountMatch) {
-            console.warn(`[Layer 2] Semantic mismatch detected:`);
+            console.warn(`[QubicService] Semantic mismatch detected for txId: ${txId.substring(0,12)}...`);
             console.warn(`  Expected: source=${expectedSource.substring(0,12)}..., amount=${expectedAmount}`);
             console.warn(`  On-chain: source=${onChainTx.sourceId.substring(0,12)}..., amount=${onChainTx.amount}`);
             return false;
         }
 
-        console.info(`[Layer 2] Transaction verified successfully`);
+        console.info(`[QubicService] Transaction verified successfully: ${txId.substring(0,12)}...`);
         return true;
     } catch (error) {
-        console.error(`[Layer 2] RPC verification error: ${error.message}`);
+        console.error(`[QubicService] RPC verification error for txId: ${txId.substring(0,12)}...: ${error.message}`);
         return false;
     }
 }

@@ -147,15 +147,20 @@ const processWebhook = async (req, requestId) => {
             const tx = validatedPayload.RawTransaction.transaction;
             const parsed = validatedPayload.ParsedTransaction;
 
-            if (!await preventReplay(tx.txId, requestId)) {
-                skipped++;
-                continue;
-            }
-
+            // --- CHANGED: RPC Check First ---
+            // 1. Verify on Blockchain (Ensures we don't save junk to DB)
             if (!await verifyOnChain(tx.txId, tx.sourceId, tx.amount, requestId)) {
                 skipped++;
                 continue;
             }
+
+            // 2. Prevent Replay (Now only runs if RPC was successful)
+            // This also saves the txId to the DB to stop future duplicates
+            if (!await preventReplay(tx.txId, requestId)) {
+                skipped++;
+                continue;
+            }
+            // --------------------------------
 
             const challenge = await matchChallenge(tx.sourceId, parsed.NumberOfShares, requestId);
             if (!challenge) {
@@ -170,6 +175,7 @@ const processWebhook = async (req, requestId) => {
 
             await prisma.$transaction(async (prisma) => {
                 await verifyWallet(tx.sourceId, challenge.discordId, requestId);
+                // Note: In the future, consider moving these out of the transaction for speed
                 const { allWallets, totalNetWorth } = await calculatePortfolio(challenge.discordId, requestId);
                 await assignRolesAndNotify(req, challenge, tx.sourceId, parsed, allWallets, totalNetWorth, requestId);
                 await cleanup(tx.sourceId, requestId);

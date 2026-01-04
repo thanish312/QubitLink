@@ -4,7 +4,7 @@
     "description": "",
     "main": "index.js",
       "scripts": {
-        "build": "npm run install:all && npm run build:frontend && npx prisma generate && npx prisma migrate deploy",
+        "build": "npm run install:all && npm run build:frontend && npx prisma generate",
         "install:all": "npm install && cd frontend && npm install && cd ..",
         "build:frontend": "cd frontend && npm run build",
     

@@ -2,7 +2,7 @@
 <img width="1024" height="1024" alt="QubicLink Logo" src="https://github.com/user-attachments/assets/4a274c60-0029-4b8b-a233-459d432faeff" />
 A production-grade identity bridge that securely links **Discord identities** with **Qubic blockchain wallets**. It enables **automated, trustless verification** and **on-chain, portfolio-based role management** without requiring users to sign messages or expose private keys.
 
-<img width="1919" height="1078" alt="Admin Dashboard" src="https://github.com/user-attachments/assets/18eb839a-8570-4cb8-9bd7-37ad07a4a489" />
+
 ---
 
 ## Key Capabilities
@@ -25,6 +25,8 @@ A production-grade identity bridge that securely links **Discord identities** wi
     -   Ownership conflict protection to prevent wallet theft.
 
 -   **📊 Admin Dashboard & Control:**
+-   <img width="1919" height="1078" alt="QubicLink Dashboard" src="https://github.com/user-attachments/assets/a904d44a-ee50-4458-a795-494c322bc2a8" />
+
     -   A secure React SPA for operational visibility.
     -   Manage wallets, users, and role thresholds.
     -   Manually trigger a full portfolio and role refresh for all users, which intelligently resets the next scheduled job.
@@ -121,6 +123,7 @@ LOG_LEVEL=info
 ## Initial Role Setup
 
 After the first launch, you must configure the roles you want to manage automatically.
+<img width="1919" height="1078" alt="image" src="https://github.com/user-attachments/assets/4e8211ec-126f-4f9f-8416-228e184d6ca1" />
 
 1.  Log into the admin dashboard.
 2.  Navigate to the **Settings / Role Thresholds** page.

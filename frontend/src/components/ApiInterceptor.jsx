@@ -1,17 +1,16 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import api from '../api';
 
 const ApiInterceptor = ({ children }) => {
-    const navigate = useNavigate();
+    const { logout } = useAuth();
 
     useEffect(() => {
         const interceptor = api.interceptors.response.use(
             (response) => response,
             (error) => {
                 if (error.response && error.response.status === 401) {
-                    localStorage.removeItem('admin_token');
-                    navigate('/login');
+                    logout();
                 }
                 return Promise.reject(error);
             }
@@ -20,7 +19,7 @@ const ApiInterceptor = ({ children }) => {
         return () => {
             api.interceptors.response.eject(interceptor);
         };
-    }, [navigate]);
+    }, [logout]);
 
     return children;
 };

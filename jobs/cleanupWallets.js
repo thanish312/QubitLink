@@ -1,5 +1,6 @@
+const logger = require('../utils/logger');
 const cron = require('node-cron');
-const prisma = require('../services/prisma');
+const { prisma } = require('../services/prisma');
 const CONFIG = require('../config/config');
 
 // This interval is used to prevent the cleanup job from deleting a wallet
@@ -9,40 +10,75 @@ const CLEANUP_INTERVAL_HOURS = 24;
 const cleanupWalletsJob = () => {
     try {
         cron.schedule(CONFIG.CLEANUP_JOB_SCHEDULE, async () => {
-            console.info('=== 🧹 Database Cleanup Started ===');
-            
+            logger.info('=== 🧹 Database Cleanup Started ===');
+
             try {
-                const cutoffDate = new Date(Date.now() - CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000);
-                
+                const cutoffDate = new Date(
+                    Date.now() - CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000
+                );
+
                 // 1. Clean up Expired Challenges
                 // These are safe to delete immediately after they expire.
                 const deletedChallenges = await prisma.challenge.deleteMany({
-                    where: { expiresAt: { lt: new Date() } }
+                    where: { expiresAt: { lt: new Date() } },
                 });
                 if (deletedChallenges.count > 0) {
-                    console.info(`   - Removed ${deletedChallenges.count} expired challenges`);
+                    logger.info(
+                        { count: deletedChallenges.count },
+                        'Removed expired challenges'
+                    );
                 }
 
                 // 2. Clean up Old Unverified Wallets
-                // We only delete them if they are older than the cleanup interval
-                // to avoid interfering with active verifications.
-                const deletedWallets = await prisma.wallet.deleteMany({
+                const staleWallets = await prisma.wallet.findMany({
                     where: {
                         isVerified: false,
                         createdAt: { lt: cutoffDate },
                     },
                 });
-                
-                if (deletedWallets.count > 0) {
-                    console.info(`   - Removed ${deletedWallets.count} stale wallets (>${CLEANUP_INTERVAL_HOURS}h old)`);
+
+                if (staleWallets.length > 0) {
+                    const staleWalletAddresses = staleWallets.map(
+                        (w) => w.address
+                    );
+
+                    const activeChallenges = await prisma.challenge.findMany({
+                        where: {
+                            walletAddress: { in: staleWalletAddresses },
+                            expiresAt: { gt: new Date() },
+                        },
+                    });
+
+                    const walletsToDelete = staleWallets.filter(
+                        (w) =>
+                            !activeChallenges.some(
+                                (c) => c.walletAddress === w.address
+                            )
+                    );
+
+                    if (walletsToDelete.length > 0) {
+                        const deletedWallets = await prisma.wallet.deleteMany({
+                            where: {
+                                address: {
+                                    in: walletsToDelete.map((w) => w.address),
+                                },
+                            },
+                        });
+
+                        if (deletedWallets.count > 0) {
+                            logger.info(
+                                { count: deletedWallets.count },
+                                `Removed stale wallets (>${CLEANUP_INTERVAL_HOURS}h old)`
+                            );
+                        }
+                    }
                 }
-                
-            } catch (e) { 
-                console.error('Cleanup job error:', e.message); 
+            } catch (e) {
+                logger.error({ err: e }, 'Cleanup job error');
             }
         });
     } catch (e) {
-        console.error('Failed to start cleanup job:', e.message);
+        logger.error({ err: e }, 'Failed to start cleanup job');
     }
 };
 

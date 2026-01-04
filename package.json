@@ -1,31 +1,48 @@
 {
-  "name": "qubiclink",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "build": "cd frontend && npm install && npm run build && cd ..",
-    "build:frontend": "cd frontend && npm install && npm run build && cd ..",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:setup": "prisma generate && prisma db push",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "MIT",
-  "type": "commonjs",
-  "dependencies": {
-    "@prisma/client": "^5.22.0",
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "helmet": "^8.1.0",
-    "node-cron": "^4.2.1",
-    "zod": "^4.2.1"
-  },
-  "devDependencies": {
-    "prisma": "^5.22.0"
-  }
+    "name": "qubiclink",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+      "scripts": {
+        "build": "npm run install:all && npm run build:frontend && npx prisma generate && npx prisma migrate deploy",
+        "install:all": "npm install && cd frontend && npm install && cd ..",
+        "build:frontend": "cd frontend && npm run build",
+    
+        "start": "node index.js",
+    
+        "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+        "dev:backend": "node index.js --dev",
+        "dev:frontend": "cd frontend && npm run dev",
+    
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "lint": "eslint .",
+        "format": "prettier --write ."
+      },    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "type": "commonjs",
+    "dependencies": {
+        "@prisma/client": "^5.22.0",
+        "cors": "^2.8.5",
+        "discord.js": "^14.25.1",
+        "dotenv": "^17.2.3",
+        "express": "^5.2.1",
+        "helmet": "^8.1.0",
+        "jsonwebtoken": "^9.0.3",
+        "node-cron": "^4.2.1",
+        "pino": "^10.1.0",
+        "pino-pretty": "^13.1.3",
+        "zod": "^4.2.1"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.2",
+        "concurrently": "^8.2.2",
+        "eslint": "^9.39.2",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-plugin-react": "^7.37.5",
+        "globals": "^17.0.0",
+        "http-proxy-middleware": "^3.0.0",
+        "prettier": "^3.7.4",
+        "prisma": "^5.22.0"
+    }
 }

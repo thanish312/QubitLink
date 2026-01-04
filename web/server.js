@@ -3,57 +3,82 @@ const path = require('path');
 const helmet = require('helmet');
 const webhookRouter = require('./routes/webhook');
 const adminRouter = require('./routes/admin');
+const logger = require('../utils/logger');
 
-const createServer = (discordClient) => {
+const createServer = (discordClient, tasks) => {
     const app = express();
     const PORT = process.env.PORT || 3000;
+    const VITE_PORT = 5173;
+    const isDev = process.argv.includes('--dev');
 
-    // 1. Security Middleware
-    // TODO: Investigate removing 'unsafe-inline' for scriptSrc.
-    // This is currently needed for React hydration, but it's a security risk.
-    app.use(helmet({
-        contentSecurityPolicy: {
-            directives: {
-                defaultSrc: ["'self'"],
-                scriptSrc: ["'self'", "'unsafe-inline'"],
-                imgSrc: ["'self'", "data:", "https://cdn.discordapp.com"],
-            },
-        },
-    }));
-    app.use(express.json());
+    /*
+     * 1. Core Middleware & App Context
+     */
+    app.use(helmet()); // Apply basic security headers
+    app.use(express.json()); // Essential for parsing JSON request bodies
     app.set('discord_client', discordClient);
+    app.set('tasks', tasks);
 
-    // 2. API Routes
+
+    /*
+     * 2. API Routes (must be first)
+     */
     app.use('/webhook', webhookRouter);
     app.use('/api/admin', adminRouter);
 
-    // 3. Frontend Static Serving
-    const frontendDist = path.join(__dirname, '../frontend/dist');
-    app.use('/dashboard', express.static(frontendDist));
+    if (isDev) {
+        /*
+         * 3a. Development – Proxy to Vite
+         */
+        const { createProxyMiddleware } = require('http-proxy-middleware');
 
-    // 4. Root Redirect
-    app.get('/', (req, res) => {
-        res.redirect('/dashboard');
-    });
+        app.use(
+            '/',
+            createProxyMiddleware({
+                target: `http://localhost:${VITE_PORT}`,
+                changeOrigin: true,
+                ws: true,
+                logLevel: 'warn',
+            })
+        );
+    } else {
+        /*
+         * 3b. Production – Static frontend
+         */
+        const frontendDist = path.join(__dirname, '../frontend/dist');
 
-    // 5. Frontend SPA Fallback - serve index.html for all dashboard sub-routes
-    // This handles client-side routing for paths like /dashboard/settings, /dashboard/users, etc.
-    // The static middleware above handles /dashboard itself and existing static files
-    app.get(/^\/dashboard\/.+/, (req, res) => {
-        res.sendFile(path.join(frontendDist, 'index.html'));
-    });
+        app.use(express.static(frontendDist));
 
-    // 6. Error Handling Middleware
+        /*
+         * 4. SPA fallback (Express 5 safe)
+         *    Use middleware, NOT app.get('*') or '/*'
+         */
+        app.use((req, res, next) => {
+            if (req.method !== 'GET') return next();
+            res.sendFile(path.join(frontendDist, 'index.html'));
+        });
+    }
+
+    /*
+     * 5. Error handler (Express 5 signature)
+     */
     app.use((err, req, res, next) => {
-        console.error(err.stack);
-        res.status(500).send('Something broke!');
+        logger.error({ err }, 'Unhandled server error');
+
+        if (res.headersSent) {
+            return next(err);
+        }
+
+        res.status(500).json({
+            error: { message: 'Internal Server Error' },
+        });
     });
 
     const start = () => {
         app.listen(PORT, () => {
-            console.info('=== QubicLink Server Started ===');
-            console.info(`🔒 Security Headers Enabled`);
-            console.info(`🚀 Admin Dashboard: http://localhost:${PORT}/dashboard`);
+            logger.info('=== QubicLink Server Started ===');
+            logger.info(`🔥 Mode: ${isDev ? 'Development' : 'Production'}`);
+            logger.info(`🚀 Application running at: http://localhost:${PORT}`);
         });
     };
 

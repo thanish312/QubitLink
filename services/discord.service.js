@@ -1,5 +1,5 @@
-const { MessageFlags } = require('discord.js');
-const { DISCORD_ERROR_CODES } = require('../bot/constants');
+const logger = require('../utils/logger');
+
 
 /**
  * Safely adds a role to a Discord member with hierarchy checks.
@@ -9,18 +9,33 @@ const { DISCORD_ERROR_CODES } = require('../bot/constants');
  */
 async function addRoleSafe(member, roleId, roleName) {
     if (!roleId) {
-        console.warn(`[DiscordService] Role ID missing for ${roleName}`);
+        logger.warn({ roleName }, '[DiscordService] Role ID missing');
         return;
     }
-    
+
     try {
         if (member.roles.cache.has(roleId)) {
+            logger.debug(
+                { roleName, userId: member.id },
+                '[DiscordService] Member already has role'
+            );
             return;
         }
         await member.roles.add(roleId);
-        console.info(`[DiscordService] Role assigned: ${roleName} -> ${member.user.tag} (${member.id})`);
+        logger.info(
+            { roleName, userId: member.id, userTag: member.user.tag },
+            '[DiscordService] Role assigned'
+        );
     } catch (error) {
-        console.error(`[DiscordService] Role assignment failed: ${roleName} -> ${member.user.tag}. Error: ${error.message}. Check bot role hierarchy.`);
+        logger.error(
+            {
+                err: error,
+                roleName,
+                userId: member.id,
+                userTag: member.user.tag,
+            },
+            '[DiscordService] Role assignment failed. Check bot role hierarchy.'
+        );
     }
 }
 
@@ -32,35 +47,31 @@ async function addRoleSafe(member, roleId, roleName) {
  */
 async function removeRoleSafe(member, roleId, roleName) {
     if (!roleId) return;
-    
+
     try {
         if (!member.roles.cache.has(roleId)) {
+            logger.debug(
+                { roleName, userId: member.id },
+                '[DiscordService] Member does not have role'
+            );
             return;
         }
         await member.roles.remove(roleId);
-        console.info(`[DiscordService] Role removed: ${roleName} <- ${member.user.tag} (${member.id})`);
+        logger.info(
+            { roleName, userId: member.id, userTag: member.user.tag },
+            '[DiscordService] Role removed'
+        );
     } catch (error) {
-        console.error(`[DiscordService] Role removal failed: ${roleName} <- ${member.user.tag}. Error: ${error.message}`);
+        logger.error(
+            {
+                err: error,
+                roleName,
+                userId: member.id,
+                userTag: member.user.tag,
+            },
+            '[DiscordService] Role removal failed'
+        );
     }
 }
 
-/**
- * Safely defers a Discord interaction reply.
- * @param {import('discord.js').Interaction} interaction - The interaction to defer.
- */
-async function safeDeferReply(interaction) {
-    if (!interaction || interaction.deferred || interaction.replied) return;
-    
-    try {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    } catch (err) {
-        if (err?.code === DISCORD_ERROR_CODES.INTERACTION_ALREADY_ACKNOWLEDGED) return;
-        console.error(`[DiscordService] Defer reply failed: ${err.message}`);
-    }
-}
-
-module.exports = {
-    addRoleSafe,
-    removeRoleSafe,
-    safeDeferReply
-};
+module.exports = { addRoleSafe, removeRoleSafe };

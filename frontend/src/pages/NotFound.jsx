@@ -22,7 +22,12 @@ const NotFound = () => {
             <Typography variant="body1" gutterBottom>
                 The page you are looking for does not exist.
             </Typography>
-            <Button component={Link} to="/dashboard" variant="contained" sx={{ mt: 2 }}>
+            <Button
+                component={Link}
+                to="/dashboard"
+                variant="contained"
+                sx={{ mt: 2 }}
+            >
                 Go to Dashboard
             </Button>
         </Box>

@@ -1,278 +1,137 @@
-# QubicLink
+# QubicLink 
+<img width="1024" height="1024" alt="QubicLink Logo" src="https://github.com/user-attachments/assets/4a274c60-0029-4b8b-a233-459d432faeff" />
+A production-grade identity bridge that securely links **Discord identities** with **Qubic blockchain wallets**. It enables **automated, trustless verification** and **on-chain, portfolio-based role management** without requiring users to sign messages or expose private keys.
 
-**QubicLink** is a Web3 identity verification and automation system that links on-chain wallet activity with Discord communities on the Qubic blockchain.
+<img width="1919" height="1078" alt="Admin Dashboard" src="https://github.com/user-attachments/assets/18eb839a-8570-4cb8-9bd7-37ad07a4a489" />
+---
 
-It enables secure wallet ownership verification, multi-wallet portfolio aggregation, and automated role assignment — without requiring users to sign transactions or interact with smart contracts.
+## Key Capabilities
 
-QubicLink is designed for real community workflows, not demos.
+-   **🔐 Trustless Wallet Verification:** Users prove wallet ownership through a verifiable on-chain action (a micro-transaction signal), re-verified against the Qubic RPC.
+
+-   **⚡ Dynamic & Automated Role Management:**
+    -   Assign Discord roles automatically based on a user's total Qubic portfolio value.
+    -   Create custom roles and balance thresholds (e.g., "Verified", "Whale", "Shark") directly from a secure admin dashboard. No more hardcoding!
+
+-   **🔄 Resilient Background Jobs:**
+    -   Scheduled jobs periodically refresh user portfolios and reconcile Discord roles to ensure they always reflect on-chain reality.
+    -   **Connection Resiliency:** All database and RPC interactions are built with automatic retry logic and circuit breakers to handle sleeping serverless databases and temporary network failures gracefully.
+
+-   **🛡️ Defense-in-Depth Security:**
+    -   **Strict CORS Policy** for the admin API in development.
+    -   **JWT-based Authentication** for the admin dashboard.
+    -   Zod schema validation for all incoming API data.
+    -   Idempotent transaction processing to prevent replay attacks.
+    -   Ownership conflict protection to prevent wallet theft.
+
+-   **📊 Admin Dashboard & Control:**
+    -   A secure React SPA for operational visibility.
+    -   Manage wallets, users, and role thresholds.
+    -   Manually trigger a full portfolio and role refresh for all users, which intelligently resets the next scheduled job.
 
 ---
 
-<div align="center">
+## Technology Stack
 
-<img width="1024" height="1024" alt="QubicLink Banner" src="https://github.com/user-attachments/assets/d889a2a1-6005-44f0-aea2-9395e8779a30" />
-
-</div>
-
----
-
-## Overview
-
-Managing identity in Web3 communities is still largely manual and error-prone. Wallets exist on-chain, communities exist off-chain, and there is no reliable way to connect the two.
-
-**QubicLink** bridges this gap by providing a practical identity layer between the Qubic blockchain and Discord. It allows community operators to verify wallet ownership, aggregate balances across multiple wallets, and automate Discord roles based on real on-chain data.
-
-No smart contracts. No signatures. No friction.
+-   **Backend:** Node.js, Express, discord.js, Prisma, PostgreSQL, Pino (Logger)
+-   **Frontend:** React, Vite, Material-UI, TanStack Query
+-   **Jobs:** node-cron
 
 ---
 
-## The Problem: On-Chain Activity, Off-Chain Blindness
+## Environment Configuration
 
-Community operators face several persistent issues:
+Create a `.env` file in the project root. **Role thresholds like "Whale" or "Verified" are no longer set here; they are managed in the admin dashboard after initial setup.**
 
-* **Invisible high-value users**
-  Large token holders are visible on-chain but anonymous in Discord.
+```ini
+# --- Core Discord Bot Credentials ---
+DISCORD_TOKEN=
+CLIENT_ID=
+GUILD_ID=
 
-* **Manual role management**
-  Assigning roles or rewards requires spreadsheets, screenshots, and trust.
+# --- Admin Dashboard ---
+# A strong password for the admin login page.
+ADMIN_PASSWORD=
+# A long, random secret for signing JWTs. Generate one from a password manager or CLI.
+ADMIN_JWT_SECRET=
+# The full URL where the frontend is hosted (for development and CORS).
+FRONTEND_URL=http://localhost:3000
 
-* **Disconnected engagement**
-  Significant on-chain events occur without any off-chain recognition or automation.
-
----
-
-## The Solution: Wallet Verification + Automation
-
-QubicLink introduces a secure, cost-neutral verification mechanism combined with automated portfolio tracking.
-
-### Wallet Ownership Verification
-
-Users verify ownership by placing a uniquely identifiable limit order on the Qubic Exchange (QX).
-The system detects this signal instantly, and the order can be canceled immediately — resulting in zero cost to the user.
-
-### Multi-Wallet Portfolio Aggregation
-
-Users may link multiple wallets to a single Discord identity, allowing accurate representation of total holdings.
-
-### Automated Role Assignment
-
-Wallet balances are periodically fetched and aggregated. Discord roles (e.g. *Verified*, *Whale*, *Tiered Roles*) are assigned or revoked automatically based on configurable thresholds.
-
----
-
-## Key Features
-
-* **Multi-wallet identity linking**
-  Aggregate balances across any number of wallets.
-
-* **Automated Discord role synchronization**
-  Roles update dynamically as balances change.
-
-* **Self-healing role logic**
-  Background jobs refresh balances and correct roles automatically.
-
-* **Gasless & signature-free verification**
-  No smart contracts, no approvals, no attack surface.
-
-* **Anti-impersonation safeguards**
-  A wallet can only be linked to one Discord account.
-
----
-
-## Tech Stack
-
-| Component           | Technology                             |
-| ------------------- | -------------------------------------- |
-| Backend             | Node.js, Express                       |
-| Discord Integration | discord.js                             |
-| Database            | PostgreSQL + Prisma ORM                |
-| Scheduling          | node-cron                              |
-| Hosting             | Docker / Railway                       |
-| Data Sources        | EasyConnect Webhooks, Qubic Public RPC |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-* Node.js v18+
-* PostgreSQL database
-* Discord bot application
-
-### Installation
-
-```bash
-git clone https://github.com/thanish312/QubicLink.git
-cd QubicLink
-git checkout v2_production
-npm install
-```
-
-### Database Setup
-
-```bash
-cp .env.example .env
-# Generate Prisma client before pushing the schema
-npx prisma generate
-npx prisma db push
+# --- Logging ---
+# Set the logging verbosity. Options: 'debug', 'info', 'warn', 'error'.
+LOG_LEVEL=info
 ```
 
 ---
 
-## Configuration
+## Local Development
 
-```env
-DISCORD_TOKEN=YOUR_BOT_TOKEN
-CLIENT_ID=YOUR_APPLICATION_ID
-GUILD_ID=YOUR_SERVER_ID
+**Prerequisites:**
+-   Node.js (v18+ recommended)
+-   PostgreSQL database
 
-DATABASE_URL=postgresql://user:pass@host:port/dbname
+**Steps:**
 
-VERIFIED_ROLE_ID=DISCORD_ROLE_ID
-WHALE_ROLE_ID=DISCORD_ROLE_ID
+1.  **Clone the repository**
+    ```bash
+    git clone <your-repo-url>
+    cd qubiclink
+    ```
 
-PORT=3000
-```
+2.  **Configure Environment**
+    -   Create and populate your `.env` file as described in the section above.
 
----
+3.  **Install All Dependencies**
+    ```bash
+    npm run install:all
+    ```
 
-## Running the Service
+4.  **Set up and Sync Database**
+    *For the first time, you may need to create a migration*
+    ```bash
+    npx prisma migrate dev --name initial-setup
+    ```
 
-```bash
-node index.js
-```
-
-The bot will initialize slash commands and begin listening for verification events.
-
----
-
-## Roadmap
-
-* Admin web dashboard for role configuration
-* Governance and voting integrations
-* Server-agnostic global command support
-
----
-
-## Deploy (Railway + Neon Postgres) & EasyConnect Setup
-
-This guide explains how to deploy QubicLink using Railway with a PostgreSQL database (Railway or Neon) and connect EasyConnect alerts via webhooks.
-
-### 1. Prepare the database
-
-* Create a PostgreSQL database on **Railway** or **Neon**.
-* Copy the full Postgres connection URL. This will be used as `DATABASE_URL`.
-
-### 2. Fork and deploy on Railway
-
-1. Fork this repository.
-2. In Railway, create a **New Project → Deploy from GitHub** and select your fork.
-3. Ensure the service is public and deployable.
-
-### 3. Required shared environment variables
-
-Create the following **Project Shared Variables** in Railway:
-
-```
-DISCORD_TOKEN      # Bot token from Discord Developer Portal
-CLIENT_ID          # Discord application (client) ID
-GUILD_ID           # Discord server ID (copy with Developer Mode enabled)
-DATABASE_URL       # PostgreSQL connection URL
-VERIFIED_ROLE_ID   # Role ID for Verified users
-WHALE_ROLE_ID      # Role ID for Whale / tier role
-PORT               # Set to 3000
-```
-
-### 4. Discord application setup
-
-1. Create an application at [https://discord.com/developers/applications](https://discord.com/developers/applications).
-2. Add a **Bot** and copy the **Bot Token**.
-3. Enable **Server Members Intent** under Bot settings.
-4. Invite the bot to your server with permissions to **Manage Roles**, **Read Messages**, and **Use Slash Commands**.
-5. Enable **Developer Mode** in Discord and copy:
-
-   * Server (Guild) ID
-   * Role IDs for `VERIFIED_ROLE_ID` and `WHALE_ROLE_ID`
-6. Ensure role hierarchy:
-
-   * Bot role is higher than all managed roles
-   * Whale role is higher than Verified role (if tiering is required)
-
-### 5. Railway build and start commands
-
-**Build command**
-
-```bash
-npm install && cd frontend && npm install && npm run build && cd ..
-```
-
-This installs backend dependencies, installs frontend dependencies, builds the React frontend, and returns to the root directory.
-
-**Start command**
-
-```bash
-npx prisma generate && npx prisma db push && node index.js
-```
-
-This generates the Prisma client, pushes the database schema, and starts the server.
-
-**Note:** The frontend must be built before deployment. The build command ensures the `frontend/dist/` directory exists for the Express server to serve static files.
-
-### 6. Webhook public URL
-
-After deployment, Railway provides a public URL such as:
-
-```
-https://<your-project>.up.railway.app
-```
-
-The webhook endpoint used by EasyConnect is:
-
-```
-https://<your-project>.up.railway.app/webhook/qubic
-```
-
-### 7. EasyConnect alert configuration (example)
-
-* **Contract:** Qubic Qx Smart Contract
-* **Method:** `AddToBidOrder`
-* **Conditions:**
-
-  * `NumberOfShares` > `30000`
-  * `NumberOfShares` < `100000`
-* **Notification Webhook:**
-
-  ```
-  https://<your-project>.up.railway.app/webhook/qubic
-  ```
-
-Refer to EasyConnect documentation for UI-specific configuration:
-[https://easy-academy.super.site/](https://easy-academy.super.site/)
-
-### 8. Running and testing
-
-* Deploy the service and monitor Railway logs.
-* Use `/link` in Discord to initiate wallet verification.
-* If deployment fails, verify `DATABASE_URL` and restart the service.
-* If roles do not update, check bot permissions and role hierarchy.
+5.  **Run the Application**
+    ```bash
+    npm run dev
+    ```
+    This single command concurrently starts the backend API, the frontend Vite server with hot-reload, and the Discord bot. Your browser should automatically open to `http://localhost:3000`.
 
 ---
 
-## Author
+## Production Deployment
 
-Developed by **Thanish B Urs**
+1.  **Set Environment Variables** in your hosting provider (e.g., Railway, Heroku).
 
-GitHub: [https://github.com/thanish312](https://github.com/thanish312)
+2.  **Build Command:**
+    ```bash
+    npm run build
+    ```
+    *This single command installs all dependencies, builds the frontend, generates the Prisma client, and runs database migrations.*
+
+3.  **Start Command:**
+    ```bash
+    npm start
+    ```
+    *This command runs the optimized Node.js server.*
 
 ---
 
-## License
+## Initial Role Setup
 
-MIT License
+After the first launch, you must configure the roles you want to manage automatically.
 
----
+1.  Log into the admin dashboard.
+2.  Navigate to the **Settings / Role Thresholds** page.
+3.  Click **"Add New Role"**.
+4.  Create your base role:
+    -   **Role Name:** `Verified`
+    -   **Discord Role ID:** (Paste the ID from your Discord server)
+    -   **Threshold:** `0` (This means any user with a verified wallet will get this role).
+5.  Create your other roles:
+    -   **Role Name:** `Whale`
+    -   **Discord Role ID:** (Paste the ID)
+    -   **Threshold:** `1000000` (for 1 Million Qubic).
 
-⭐ If this project is useful, consider starring the repository.
-
----
+These roles will now be automatically assigned and updated by the background jobs.

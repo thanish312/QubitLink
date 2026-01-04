@@ -17,9 +17,9 @@ function secureRandomInt(min, max) {
  * @param {number} ms - The number of milliseconds to sleep.
  * @returns {Promise<void>} - A promise that resolves after the specified time.
  */
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 module.exports = {
     secureRandomInt,
-    sleep
+    sleep,
 };

@@ -1,140 +1,255 @@
-import { useState, useEffect } from 'react';
-import { Box, TextField, Button, Typography, Paper, Grid, Alert, Divider, InputAdornment } from '@mui/material';
-import SaveIcon from '@mui/icons-material/Save';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { DataGrid } from '@mui/x-data-grid';
+import {
+    Box,
+    Typography,
+    Button,
+    IconButton,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    TextField,
+    Tooltip,
+} from '@mui/material';
+import AddCircleIcon from '@mui/icons-material/AddCircle';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useSnackbar } from 'notistack';
 import api from '../api';
 
-export default function Settings() {
-  const [config, setConfig] = useState({
-    verifiedRoleId: '',
-    whaleRoleId: '',
-    whaleThreshold: '',
-    signalCodeMin: '',
-    signalCodeMax: '',
-    challengeExpiryMinutes: '' // Frontend uses Minutes
-  });
-  const [loading, setLoading] = useState(true);
-  const { enqueueSnackbar } = useSnackbar();
-
-  useEffect(() => {
-    // Fetch config and convert ms to minutes for display
-    api.get('/config').then(res => {
-        const data = res.data;
-        setConfig({
-            ...data,
-            challengeExpiryMinutes: Math.floor(data.challengeExpiryMs / 60000) // Convert ms -> min
-        });
-        setLoading(false);
-    }).catch(() => {
-        enqueueSnackbar('Failed to load settings', { variant: 'error' });
-        setLoading(false);
+// This dialog handles both creating and editing a role.
+const RoleDialog = ({ open, onClose, role, onSave }) => {
+    const [formData, setFormData] = useState({
+        roleName: role?.roleName || '',
+        roleId: role?.roleId || '',
+        // The threshold is treated as a string to handle BigInts.
+        // It directly reflects the database value.
+        threshold: role?.threshold ? role.threshold.toString() : '0',
     });
-  }, [enqueueSnackbar]);
 
-  const handleChange = (e) => {
-    setConfig({ ...config, [e.target.name]: e.target.value });
-  };
+    const handleChange = (e) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+    };
 
-  const handleSave = async () => {
-    try {
-      // Convert Minutes back to Milliseconds for the API
-      const payload = {
-        ...config,
-        challengeExpiryMs: config.challengeExpiryMinutes * 60000
-      };
+    const handleSubmit = () => {
+        // Send the form data directly. The backend expects the threshold as a string.
+        onSave(formData);
+        onClose();
+    };
 
-      await api.put('/config', payload);
-      enqueueSnackbar('Runtime configuration updated successfully!', { variant: 'success' });
-    } catch {
-      enqueueSnackbar('Failed to save configuration', { variant: 'error' });
-    }
-  };
+    return (
+        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+            <DialogTitle>
+                {role ? 'Edit Role Threshold' : 'Add New Role Threshold'}
+            </DialogTitle>
+            <DialogContent sx={{ pt: 2 }}>
+                <TextField
+                    autoFocus
+                    margin="dense"
+                    name="roleName"
+                    label="Role Name"
+                    fullWidth
+                    variant="outlined"
+                    value={formData.roleName}
+                    onChange={handleChange}
+                    helperText="A friendly name for the role (e.g., Whale, Shark)."
+                    sx={{ mb: 2 }}
+                />
+                <TextField
+                    margin="dense"
+                    name="roleId"
+                    label="Discord Role ID"
+                    fullWidth
+                    variant="outlined"
+                    value={formData.roleId}
+                    onChange={handleChange}
+                    helperText="The actual ID of the role from your Discord server."
+                    sx={{ mb: 2 }}
+                />
+                <TextField
+                    margin="dense"
+                    name="threshold"
+                    label="Threshold"
+                    type="text" // Use text to handle large numbers as strings without corruption
+                    inputProps={{ pattern: '[0-9]*' }} // Allow only digits
+                    fullWidth
+                    variant="outlined"
+                    value={formData.threshold}
+                    onChange={handleChange}
+                    helperText="The exact balance a user must have to get this role (e.g., 1000000)."
+                />
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={onClose}>Cancel</Button>
+                <Button onClick={handleSubmit} variant="contained">
+                    Save Role
+                </Button>
+            </DialogActions>
+        </Dialog>
+    );
+};
 
-  if (loading) return <Typography>Loading configuration...</Typography>;
+export default function Settings() {
+    const queryClient = useQueryClient();
+    const { enqueueSnackbar } = useSnackbar();
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [selectedRole, setSelectedRole] = useState(null);
 
-  return (
-    <Box sx={{ maxWidth: 900, mx: 'auto' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, justifyContent: 'space-between' }}>
-          <Typography variant="h4">System Configuration</Typography>
-          <Button 
-            variant="contained" 
-            size="large" 
-            startIcon={<SaveIcon />}
-            onClick={handleSave}
-          >
-            Apply Changes
-          </Button>
-      </Box>
+    const { data: roles = [], isLoading } = useQuery({
+        queryKey: ['roles'],
+        queryFn: () => api.get('/roles').then((res) => res.data),
+    });
 
-      <Alert icon={<WarningAmberIcon />} severity="info" sx={{ mb: 4, border: '1px solid #2d4d66' }}>
-        <strong>Runtime Mode:</strong> These settings are applied instantly to the running bot. 
-        However, for security reasons, they are not saved to the <code>.env</code> file. 
-        If you restart the bot, settings will revert to the defaults.
-      </Alert>
-      
-      <Paper sx={{ p: 4 }}>
-        <Typography variant="h6" sx={{ color: 'primary.main', mb: 2 }}>🤖 Discord Integration</Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <TextField 
-              fullWidth label="Verified Role ID" name="verifiedRoleId" 
-              value={config.verifiedRoleId} onChange={handleChange} 
-              placeholder="e.g. 123456789..."
+    const mutationOptions = {
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['roles'] });
+        },
+        onError: (error) => {
+            enqueueSnackbar(
+                error.response?.data?.error || 'An error occurred',
+                { variant: 'error' }
+            );
+        },
+    };
+
+    const createMutation = useMutation({
+        mutationFn: (newRole) => api.post('/roles', newRole),
+        ...mutationOptions,
+        onSuccess: () => {
+            enqueueSnackbar('Role created successfully', {
+                variant: 'success',
+            });
+            mutationOptions.onSuccess();
+        },
+    });
+
+    const updateMutation = useMutation({
+        mutationFn: (updatedRole) =>
+            api.put(`/roles/${updatedRole.id}`, updatedRole),
+        ...mutationOptions,
+        onSuccess: () => {
+            enqueueSnackbar('Role updated successfully', {
+                variant: 'success',
+            });
+            mutationOptions.onSuccess();
+        },
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: (id) => api.delete(`/roles/${id}`),
+        ...mutationOptions,
+        onSuccess: () => {
+            enqueueSnackbar('Role deleted successfully', {
+                variant: 'success',
+            });
+            mutationOptions.onSuccess();
+        },
+    });
+
+    const handleOpenDialog = (role = null) => {
+        setSelectedRole(role);
+        setDialogOpen(true);
+    };
+
+    const handleCloseDialog = () => {
+        setDialogOpen(false);
+        setSelectedRole(null);
+    };
+
+    const handleSave = (roleData) => {
+        if (selectedRole) {
+            updateMutation.mutate({ ...roleData, id: selectedRole.id });
+        } else {
+            createMutation.mutate(roleData);
+        }
+    };
+
+    const columns = [
+        { field: 'roleName', headerName: 'Role Name', width: 250 },
+        { field: 'roleId', headerName: 'Discord Role ID', width: 250 },
+        {
+            field: 'threshold',
+            headerName: 'Threshold',
+            width: 250,
+            renderCell: (params) => {
+                try {
+                    // Format the number with commas for readability
+                    return (
+                        <Typography>{BigInt(params.value).toLocaleString()}</Typography>
+                    );
+                } catch (e) {
+                    return <Typography>N/A</Typography>;
+                }
+            },
+        },
+        {
+            field: 'actions',
+            headerName: 'Actions',
+            width: 150,
+            sortable: false,
+            renderCell: (params) => (
+                <Box>
+                    <Tooltip title="Edit Role">
+                        <IconButton
+                            onClick={() => handleOpenDialog(params.row)}
+                        >
+                            <EditIcon />
+                        </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete Role">
+                        <IconButton
+                            color="error"
+                            onClick={() => deleteMutation.mutate(params.row.id)}
+                        >
+                            <DeleteIcon />
+                        </IconButton>
+                    </Tooltip>
+                </Box>
+            ),
+        },
+    ];
+
+    return (
+        <Box sx={{ height: 600, width: '100%' }}>
+            <Box
+                sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    mb: 2,
+                }}
+            >
+                <Typography variant="h4">Role Thresholds</Typography>
+                <Button
+                    variant="contained"
+                    startIcon={<AddCircleIcon />}
+                    onClick={() => handleOpenDialog()}
+                >
+                    Add New Role
+                </Button>
+            </Box>
+            <DataGrid
+                rows={roles}
+                columns={columns}
+                loading={
+                    isLoading ||
+                    createMutation.isPending ||
+                    updateMutation.isPending ||
+                    deleteMutation.isPending
+                }
+                getRowId={(row) => row.id}
+                autoHeight
             />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <TextField 
-              fullWidth label="Whale Role ID" name="whaleRoleId" 
-              value={config.whaleRoleId} onChange={handleChange} 
-              placeholder="e.g. 987654321..."
-            />
-          </Grid>
-        </Grid>
-
-        <Divider sx={{ my: 4 }} />
-
-        <Typography variant="h6" sx={{ color: 'primary.main', mb: 2 }}>⚙️ Logic & Thresholds</Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <TextField 
-              fullWidth label="Whale Threshold (QUBIC)" name="whaleThreshold" 
-              value={config.whaleThreshold} onChange={handleChange}
-              helperText="The balance required to automatically receive the Whale role."
-              InputProps={{
-                  endAdornment: <InputAdornment position="end">QUs</InputAdornment>
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField 
-              fullWidth label="Challenge Expiry" name="challengeExpiryMinutes" 
-              type="number"
-              value={config.challengeExpiryMinutes} onChange={handleChange} 
-              helperText="How long a verification code is valid."
-              InputProps={{
-                  endAdornment: <InputAdornment position="end">Minutes</InputAdornment>,
-                  startAdornment: <InputAdornment position="start"><AccessTimeIcon fontSize="small"/></InputAdornment>
-              }}
-            />
-          </Grid>
-          <Grid item xs={6} md={4}>
-            <TextField 
-              fullWidth label="Min Shares (Signal)" name="signalCodeMin" 
-              type="number"
-              value={config.signalCodeMin} onChange={handleChange} 
-            />
-          </Grid>
-          <Grid item xs={6} md={4}>
-            <TextField 
-              fullWidth label="Max Shares (Signal)" name="signalCodeMax" 
-              type="number"
-              value={config.signalCodeMax} onChange={handleChange} 
-            />
-          </Grid>
-        </Grid>
-      </Paper>
-    </Box>
-  );
+            {dialogOpen && (
+                <RoleDialog
+                    open={dialogOpen}
+                    onClose={handleCloseDialog}
+                    role={selectedRole}
+                    onSave={handleSave}
+                />
+            )}
+        </Box>
+    );
 }

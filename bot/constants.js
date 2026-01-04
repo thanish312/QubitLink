@@ -2,5 +2,5 @@ module.exports = {
     DISCORD_ERROR_CODES: {
         UNKNOWN_INTERACTION: 10062,
         INTERACTION_ALREADY_ACKNOWLEDGED: 40060,
-    }
+    },
 };

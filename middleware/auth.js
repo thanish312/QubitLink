@@ -1,57 +1,64 @@
-const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
 
 /**
- * Generate admin authentication token
+ * Generate admin authentication JWT.
+ * @returns {string} - The signed JWT.
  */
 function generateAdminToken() {
-    const payload = { role: 'admin', timestamp: Date.now() };
-    return Buffer.from(JSON.stringify(payload)).toString('base64');
-}
-
-/**
- * Verify admin authentication token
- */
-function verifyAdminToken(token) {
-    try {
-        const payload = JSON.parse(Buffer.from(token, 'base64').toString());
-        // Token valid for 24 hours
-        return payload.role === 'admin' && (Date.now() - payload.timestamp) < 86400000;
-    } catch {
-        return false;
+    if (!process.env.ADMIN_JWT_SECRET) {
+        throw new Error('ADMIN_JWT_SECRET is not defined');
     }
+    const payload = { role: 'admin' };
+    return jwt.sign(payload, process.env.ADMIN_JWT_SECRET, {
+        expiresIn: '24h',
+    });
 }
 
 /**
- * Admin authentication middleware
+ * Admin authentication middleware.
+ * Verifies the JWT from the Authorization header.
  */
 function adminAuth(req, res, next) {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    
-    if (!token || !verifyAdminToken(token)) {
-        return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!token) {
+        return res
+            .status(401)
+            .json({ error: 'Unauthorized: No token provided' });
     }
-    
-    next();
+
+    try {
+        const decoded = jwt.verify(token, process.env.ADMIN_JWT_SECRET);
+        if (decoded.role !== 'admin') {
+            return res
+                .status(403)
+                .json({ error: 'Forbidden: Insufficient privileges' });
+        }
+        req.user = decoded; // Attach user info to the request
+        next();
+    } catch (error) {
+        if (error instanceof jwt.TokenExpiredError) {
+            return res
+                .status(401)
+                .json({ error: 'Unauthorized: Token expired' });
+        }
+        return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    }
 }
 
 /**
- * CORS middleware for admin routes
+ * CORS middleware for admin routes.
+ * Restricts access to the defined FRONTEND_URL.
  */
-function adminCors(req, res, next) {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    
-    next();
-}
+const adminCors = cors({
+    origin: process.env.FRONTEND_URL,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+});
 
 module.exports = {
     generateAdminToken,
-    verifyAdminToken,
     adminAuth,
-    adminCors
+    adminCors,
 };

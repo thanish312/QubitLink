@@ -1,62 +1,63 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DataGrid } from '@mui/x-data-grid';
 import { Button, Box, Typography, Chip } from '@mui/material';
 import api from '../api';
 import { useSnackbar } from 'notistack';
 
 export default function Wallets() {
-    const [wallets, setWallets] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const queryClient = useQueryClient();
     const { enqueueSnackbar } = useSnackbar();
 
-    const fetchWallets = useCallback(async () => {
-        try {
-            const res = await api.get('/wallets'); // You might want to add pagination to your backend API later
-            setWallets(res.data);
-        } catch {
-            enqueueSnackbar('Failed to load wallets', { variant: 'error' });
-        } finally {
-            setLoading(false);
-        }
-    }, [enqueueSnackbar]);
+    const { data: wallets = [], isLoading: isLoadingWallets } = useQuery({
+        queryKey: ['wallets'],
+        queryFn: () => api.get('/wallets').then((res) => res.data),
+    });
 
-    const handleDelete = async (id) => {
-        if(!confirm('Are you sure?')) return;
-        try {
-            await api.delete(`/wallets/${id}`);
+    const deleteMutation = useMutation({
+        mutationFn: (address) => api.delete(`/wallets/${address}`),
+        onSuccess: () => {
             enqueueSnackbar('Wallet deleted', { variant: 'success' });
-            fetchWallets();
-        } catch {
+            queryClient.invalidateQueries(['wallets']);
+        },
+        onError: () => {
             enqueueSnackbar('Delete failed', { variant: 'error' });
-        }
-    };
+        },
+    });
 
-    const handleVerify = async (id) => {
-        try {
-            await api.post(`/wallets/${id}/verify`);
+    const verifyMutation = useMutation({
+        mutationFn: (address) => api.post(`/wallets/${address}/verify`),
+        onSuccess: () => {
             enqueueSnackbar('Wallet verified manually', { variant: 'success' });
-            fetchWallets();
-        } catch {
+            queryClient.invalidateQueries(['wallets']);
+        },
+        onError: () => {
             enqueueSnackbar('Verification failed', { variant: 'error' });
-        }
+        },
+    });
+
+    const handleDelete = (address) => {
+        if (!confirm('Are you sure?')) return;
+        deleteMutation.mutate(address);
     };
 
-    useEffect(() => { fetchWallets(); }, [fetchWallets]);
+    const handleVerify = (address) => {
+        verifyMutation.mutate(address);
+    };
 
     const columns = [
         { field: 'address', headerName: 'Wallet Address', width: 450 },
         { field: 'userId', headerName: 'Discord ID', width: 200 },
-        { 
-            field: 'isVerified', 
-            headerName: 'Status', 
+        {
+            field: 'isVerified',
+            headerName: 'Status',
             width: 150,
             renderCell: (params) => (
-                <Chip 
-                    label={params.value ? 'Verified' : 'Pending'} 
-                    color={params.value ? 'success' : 'warning'} 
-                    size="small" 
+                <Chip
+                    label={params.value ? 'Verified' : 'Pending'}
+                    color={params.value ? 'success' : 'warning'}
+                    size="small"
                 />
-            )
+            ),
         },
         {
             field: 'actions',
@@ -65,24 +66,45 @@ export default function Wallets() {
             renderCell: (params) => (
                 <Box>
                     {!params.row.isVerified && (
-                        <Button onClick={() => handleVerify(params.row.id)} size="small">Verify</Button>
+                        <Button
+                            onClick={() => handleVerify(params.row.address)}
+                            size="small"
+                            disabled={verifyMutation.isLoading}
+                        >
+                            Verify
+                        </Button>
                     )}
-                    <Button onClick={() => handleDelete(params.row.id)} color="error" size="small">Delete</Button>
+                    <Button
+                        onClick={() => handleDelete(params.row.address)}
+                        color="error"
+                        size="small"
+                        disabled={deleteMutation.isLoading}
+                    >
+                        Delete
+                    </Button>
                 </Box>
-            )
-        }
+            ),
+        },
     ];
 
     return (
         <Box sx={{ height: 600, width: '100%' }}>
-            <Typography variant="h4" sx={{ mb: 2 }}>Wallet Manager</Typography>
+            <Typography variant="h4" sx={{ mb: 2 }}>
+                Wallet Manager
+            </Typography>
             <DataGrid
                 rows={wallets}
                 columns={columns}
-                loading={loading}
+                loading={
+                    isLoadingWallets ||
+                    deleteMutation.isLoading ||
+                    verifyMutation.isLoading
+                }
                 getRowId={(row) => row.address} // Assuming address is unique ID
                 pageSizeOptions={[10, 50, 100]}
-                initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
+                initialState={{
+                    pagination: { paginationModel: { pageSize: 10 } },
+                }}
             />
         </Box>
     );

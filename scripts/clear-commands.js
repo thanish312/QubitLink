@@ -12,14 +12,13 @@ async function clearCommands() {
             { body: [] }
         );
         console.log('✅ Guild commands cleared');
-        
+
         console.log('Clearing global commands...');
-        await rest.put(
-            Routes.applicationCommands(CONFIG.CLIENT_ID),
-            { body: [] }
-        );
+        await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), {
+            body: [],
+        });
         console.log('✅ Global commands cleared');
-        
+
         console.log('All commands cleared successfully!');
     } catch (error) {
         console.error('Error clearing commands:', error);
@@ -27,4 +26,3 @@ async function clearCommands() {
 }
 
 clearCommands();
-

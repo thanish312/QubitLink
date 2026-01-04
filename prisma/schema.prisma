@@ -10,6 +10,7 @@ datasource db {
 // The Human (Discord Account)
 model User {
   discordId     String   @id @unique
+  createdAt     DateTime @default(now())
   
   // A user can own multiple wallets
   wallets       Wallet[]
@@ -43,4 +44,18 @@ model Challenge {
 model ProcessedTransaction {
   txId      String   @id @unique // The Qubic Transaction ID
   createdAt DateTime @default(now())
+}
+
+model RoleThreshold {
+  id          String   @id @default(cuid())
+  roleId      String   @unique
+  roleName    String
+  threshold   BigInt   @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model Portfolio {
+  userId         String   @id @unique
+  totalBalance   BigInt   @default(0)
+  updatedAt      DateTime @updatedAt
 }

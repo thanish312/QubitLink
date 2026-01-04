@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { prisma } = require('../services/prisma');
 const { addRoleSafe, removeRoleSafe } = require('../services/discord.service');
 const CONFIG = require('../config/config');
+const { withRetry } = require('../utils/retry');
 
 const processUserRoles = async (guild, userPortfolio, roleThresholds) => {
     try {
@@ -88,9 +89,10 @@ const roleAssignmentJob = (client) => {
                     return;
                 }
 
-                const roleThresholds = await prisma.roleThreshold.findMany({
-                    orderBy: { threshold: 'desc' },
-                });
+                const roleThresholds = await withRetry(() =>
+                    prisma.roleThreshold.findMany({
+                        orderBy: { threshold: 'desc' },
+                    }), 'roleAssignmentJob-fetchThresholds');
 
                 if (roleThresholds.length === 0) {
                     logger.info(
@@ -99,7 +101,7 @@ const roleAssignmentJob = (client) => {
                     return;
                 }
 
-                const portfolios = await prisma.portfolio.findMany();
+                const portfolios = await withRetry(() => prisma.portfolio.findMany(), 'roleAssignmentJob-fetchPortfolios');
 
                 for (const userPortfolio of portfolios) {
                     await processUserRoles(
@@ -113,7 +115,7 @@ const roleAssignmentJob = (client) => {
             } catch (error) {
                 logger.error(
                     { err: error },
-                    'Role assignment job critical failure'
+                    'Role assignment job critical failure after retries'
                 );
             }
         });

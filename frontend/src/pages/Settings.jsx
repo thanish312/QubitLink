@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -12,6 +12,8 @@ import {
     DialogActions,
     TextField,
     Tooltip,
+    Autocomplete,
+    CircularProgress,
 } from '@mui/material';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import EditIcon from '@mui/icons-material/Edit';
@@ -24,20 +26,35 @@ const RoleDialog = ({ open, onClose, role, onSave }) => {
     const [formData, setFormData] = useState({
         roleName: role?.roleName || '',
         roleId: role?.roleId || '',
-        // The threshold is treated as a string to handle BigInts.
-        // It directly reflects the database value.
         threshold: role?.threshold ? role.threshold.toString() : '0',
     });
+
+    // Fetch all available discord roles for the autocomplete
+    const { data: discordRoles = [], isLoading: isLoadingRoles } = useQuery({
+        queryKey: ['discord-roles'],
+        queryFn: () => api.get('/discord-roles').then((res) => res.data),
+        staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    });
+
+    const handleAutocompleteChange = (event, newValue) => {
+        setFormData({
+            ...formData,
+            roleId: newValue ? newValue.id : '',
+            roleName: newValue ? newValue.name : '',
+        });
+    };
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
     const handleSubmit = () => {
-        // Send the form data directly. The backend expects the threshold as a string.
         onSave(formData);
         onClose();
     };
+
+    // Find the full role object for the current selection to pass to Autocomplete value prop
+    const selectedRoleObject = discordRoles.find(r => r.id === formData.roleId) || null;
 
     return (
         <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -45,34 +62,39 @@ const RoleDialog = ({ open, onClose, role, onSave }) => {
                 {role ? 'Edit Role Threshold' : 'Add New Role Threshold'}
             </DialogTitle>
             <DialogContent sx={{ pt: 2 }}>
-                <TextField
-                    autoFocus
-                    margin="dense"
-                    name="roleName"
-                    label="Role Name"
-                    fullWidth
-                    variant="outlined"
-                    value={formData.roleName}
-                    onChange={handleChange}
-                    helperText="A friendly name for the role (e.g., Whale, Shark)."
-                    sx={{ mb: 2 }}
-                />
-                <TextField
-                    margin="dense"
-                    name="roleId"
-                    label="Discord Role ID"
-                    fullWidth
-                    variant="outlined"
-                    value={formData.roleId}
-                    onChange={handleChange}
-                    helperText="The actual ID of the role from your Discord server."
-                    sx={{ mb: 2 }}
+                <Autocomplete
+                    id="discord-role-select"
+                    options={discordRoles}
+                    getOptionLabel={(option) => option.name}
+                    value={selectedRoleObject}
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    onChange={handleAutocompleteChange}
+                    loading={isLoadingRoles}
+                    renderInput={(params) => (
+                        <TextField
+                            {...params}
+                            label="Search for a Discord Role"
+                            variant="outlined"
+                            InputProps={{
+                                ...params.InputProps,
+                                endAdornment: (
+                                    <>
+                                        {isLoadingRoles ? (
+                                            <CircularProgress color="inherit" size={20} />
+                                        ) : null}
+                                        {params.InputProps.endAdornment}
+                                    </>
+                                ),
+                            }}
+                        />
+                    )}
+                    sx={{ mb: 2, mt: 1 }}
                 />
                 <TextField
                     margin="dense"
                     name="threshold"
                     label="Threshold"
-                    type="text" // Use text to handle large numbers as strings without corruption
+                    type="text" // Use text to handle large numbers as strings
                     inputProps={{ pattern: '[0-9]*' }} // Allow only digits
                     fullWidth
                     variant="outlined"
@@ -83,7 +105,7 @@ const RoleDialog = ({ open, onClose, role, onSave }) => {
             </DialogContent>
             <DialogActions sx={{ p: 2 }}>
                 <Button onClick={onClose}>Cancel</Button>
-                <Button onClick={handleSubmit} variant="contained">
+                <Button onClick={handleSubmit} variant="contained" disabled={!formData.roleId}>
                     Save Role
                 </Button>
             </DialogActions>

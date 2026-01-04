@@ -46,8 +46,17 @@ module.exports = async (interaction, commandId) => {
         // 3. Database Operations (Upsert User, Check Wallet)
         await prisma.user.upsert({
             where: { discordId },
-            update: {},
-            create: { discordId },
+            update: {
+                username: interaction.user.username,
+                discriminator: interaction.user.discriminator,
+                avatar: interaction.user.avatar,
+            },
+            create: {
+                discordId,
+                username: interaction.user.username,
+                discriminator: interaction.user.discriminator,
+                avatar: interaction.user.avatar,
+            },
         });
 
         const existingWallet = await prisma.wallet.findUnique({

@@ -9,9 +9,12 @@ datasource db {
 
 // The Human (Discord Account)
 model User {
-  discordId     String   @id @unique
-  createdAt     DateTime @default(now())
-  
+  discordId     String    @id @unique
+  username      String?
+  discriminator String?
+  avatar        String?
+  createdAt     DateTime  @default(now())
+
   // A user can own multiple wallets
   wallets       Wallet[]
 }

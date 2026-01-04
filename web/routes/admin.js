@@ -17,6 +17,29 @@ const { runPortfolioRefresh } = require('../../jobs/portfolioRefresh');
 // Make the config object immutable
 Object.freeze(CONFIG);
 
+/**
+ * Get all roles from the Discord Guild
+ */
+router.get(
+    '/discord-roles',
+    adminAuth,
+    asyncHandler(async (req, res) => {
+        const client = req.app.get('discord_client');
+        const guild = await client.guilds.fetch(CONFIG.GUILD_ID);
+        const roles = await guild.roles.fetch();
+
+        const roleData = roles
+            .map((role) => ({
+                id: role.id,
+                name: role.name,
+            }))
+            .filter((role) => role.name !== '@everyone' && !role.managed) // Filter out @everyone and managed (bot) roles
+            .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
+
+        res.json(roleData);
+    })
+);
+
 // Apply CORS only in development. In production, requests are same-origin.
 if (process.env.NODE_ENV !== 'production') {
     router.use(adminCors);
@@ -109,12 +132,7 @@ router.get(
     '/stats',
     adminAuth,
     asyncHandler(async (req, res) => {
-        const [
-            totalVerified,
-            pendingChallenges,
-            totalUsers,
-            recentVerifications,
-        ] = await Promise.all([
+        const [totalVerified, pendingChallenges, totalUsers, recentVerifications, portfolioAggregates] = await Promise.all([
             prisma.wallet.count({ where: { isVerified: true } }),
             prisma.challenge.count({
                 where: { expiresAt: { gt: new Date() } },
@@ -126,6 +144,9 @@ router.get(
                     verifiedAt: { gte: new Date(Date.now() - 86400000) },
                 },
             }),
+            prisma.portfolio.aggregate({
+                _sum: { totalBalance: true },
+            }),
         ]);
 
         res.json({
@@ -133,6 +154,7 @@ router.get(
             pendingChallenges,
             totalUsers,
             recentVerifications,
+            totalBalance: portfolioAggregates._sum.totalBalance || 0n,
         });
     })
 );
@@ -445,13 +467,27 @@ router.get(
     '/users',
     adminAuth,
     asyncHandler(async (req, res) => {
+        const { search } = req.query;
+
+        const whereClause = {};
+        if (search) {
+            whereClause.username = {
+                contains: search,
+                mode: 'insensitive', // Case-insensitive search
+            };
+        }
+
         const users = await prisma.user.findMany({
+            where: whereClause,
             include: { wallets: { select: { isVerified: true } } },
             orderBy: { createdAt: 'desc' },
         });
 
         const usersWithCounts = users.map((user) => ({
             discordId: user.discordId,
+            username: user.username,
+            discriminator: user.discriminator,
+            avatar: user.avatar,
             createdAt: user.createdAt,
             totalCount: user.wallets.length,
             verifiedCount: user.wallets.filter((w) => w.isVerified).length,

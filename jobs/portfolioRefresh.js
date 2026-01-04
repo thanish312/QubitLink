@@ -4,22 +4,20 @@ const { prisma } = require('../services/prisma');
 const { getQubicBalance } = require('../services/qubic.service');
 const { processUserRoles } = require('./roleAssignmentJob');
 const CONFIG = require('../config/config');
+const { withRetry } = require('../utils/retry');
 
 let rpcFailures = 0;
 let isCooldown = false;
 
 const fetchWalletsGroupedByUser = async () => {
-    const wallets = await prisma.wallet.findMany({
-        where: { isVerified: true },
-        select: { userId: true, address: true },
-    });
-
-    const userMap = new Map();
-    wallets.forEach((w) => {
-        if (!userMap.has(w.userId)) userMap.set(w.userId, []);
-        userMap.get(w.userId).push(w.address);
-    });
-    return userMap;
+    return withRetry(
+        () =>
+            prisma.wallet.findMany({
+                where: { isVerified: true },
+                select: { userId: true, address: true },
+            }),
+        'fetchWalletsGroupedByUser'
+    );
 };
 
 const updateUserPortfolioAndRoles = async (
@@ -37,11 +35,15 @@ const updateUserPortfolioAndRoles = async (
         const balances = await Promise.all(balancePromises);
         const totalNetWorth = balances.reduce((acc, curr) => acc + curr, 0n);
 
-        const userPortfolio = await prisma.portfolio.upsert({
-            where: { userId },
-            update: { totalBalance: totalNetWorth },
-            create: { userId, totalBalance: totalNetWorth },
-        });
+        const userPortfolio = await withRetry(
+            () =>
+                prisma.portfolio.upsert({
+                    where: { userId },
+                    update: { totalBalance: totalNetWorth },
+                    create: { userId, totalBalance: totalNetWorth },
+                }),
+            `updatePortfolioForUser-${userId}`
+        );
 
         await processUserRoles(guild, userPortfolio, roleThresholds);
 
@@ -84,16 +86,26 @@ const runPortfolioRefresh = async (client) => {
             return;
         }
 
-        const roleThresholds = await prisma.roleThreshold.findMany({
-            orderBy: { threshold: 'desc' },
-        });
+        const roleThresholds = await withRetry(
+            () =>
+                prisma.roleThreshold.findMany({
+                    orderBy: { threshold: 'desc' },
+                }),
+            'fetchRoleThresholds'
+        );
+
         if (roleThresholds.length === 0) {
             logger.warn(
                 'No role thresholds configured in DB. Skipping dynamic role assignment in portfolio refresh.'
             );
         }
 
-        const userMap = await fetchWalletsGroupedByUser();
+        const wallets = await fetchWalletsGroupedByUser();
+        const userMap = new Map();
+        wallets.forEach((w) => {
+            if (!userMap.has(w.userId)) userMap.set(w.userId, []);
+            userMap.get(w.userId).push(w.address);
+        });
         const userIds = Array.from(userMap.keys());
         logger.info(
             { userCount: userIds.length, walletCount: userMap.size },
